@@ -88,6 +88,13 @@ export function G_Responder(ev) {
 _ensureResponders();
 
 export function G_Ticker() {
+  // g_game.c:612 — do player reborns if needed.
+  for (let i = 0; i < MAXPLAYERS; i++) {
+    if (playeringame[i] && players[i] !== null &&
+        players[i].playerstate === 2 /*PST_REBORN*/) {
+      G_DoReborn(i);
+    }
+  }
   // g_game.c:G_Ticker uses `while (gameaction != ga_nothing)` so chained
   // actions (e.g. ga_newgame queues ga_loadlevel) drain in one tic instead
   // of taking N tics to settle. Match that with a drain loop and a guard
@@ -194,7 +201,13 @@ export function G_PlayerReborn(playernum) {
   p.maxammo[0] = 200; p.maxammo[1] = 50; p.maxammo[2] = 300; p.maxammo[3] = 50;
 }
 
-export function G_DoReborn(playernum) { G_PlayerReborn(playernum); }
+// g_game.c:922 — G_DoReborn. (Netgame respawn-at-start is not ported.)
+export function G_DoReborn(playernum) {
+  if (doomstat.netgame === false) {
+    G_PlayerReborn(playernum);
+    set_gameaction(gameaction_t.ga_loadlevel); // reload the level from scratch
+  }
+}
 
 export function G_DoLoadLevel() {
   set_gamestate(gamestate_t.GS_LEVEL);
