@@ -75,8 +75,13 @@ function installListeners() {
       // that window falls through to the menu branch below and opens the
       // main menu instead of doing nothing.
       if (ds.gamestate === 1 /*GS_INTERMISSION*/) {
-        const wi = await import('./wi_stuff.js');
-        wi.WI_Responder({ type: 0, data1: e.keyCode | 0 });
+        // Ignore keyboard auto-repeat so a held key accelerates the tally only
+        // once per physical press — matches vanilla WI_checkForAccelerate's
+        // rising-edge (attackdown/usedown) debounce.
+        if (e.repeat !== true) {
+          const wi = await import('./wi_stuff.js');
+          wi.WI_Responder({ type: 0, data1: e.keyCode | 0 });
+        }
         e.preventDefault?.();
         return;
       }
