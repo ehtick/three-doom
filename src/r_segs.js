@@ -80,11 +80,11 @@ function updateContrib(c) {
       anchorY = c.dontPegBottom ? (ff + c.texH) : fc;
       break;
     case 'upper-front':
-      zBottom = bc; zTop = fc;
+      zBottom = Math.min(fc, bc); zTop = fc;
       anchorY = c.dontPegTop ? fc : (bc + c.texH);
       break;
     case 'lower-front':
-      zBottom = ff; zTop = bf;
+      zBottom = ff; zTop = Math.max(ff, bf);
       anchorY = c.dontPegBottom ? fc : bf;
       break;
     case 'middle-front':
@@ -92,11 +92,11 @@ function updateContrib(c) {
       anchorY = c.dontPegBottom ? (Math.max(ff, bf) + c.texH) : Math.min(fc, bc);
       break;
     case 'upper-back':
-      zBottom = fc; zTop = bc;
+      zBottom = fc; zTop = Math.max(fc, bc);
       anchorY = c.dontPegTop ? bc : (fc + c.texH);
       break;
     case 'lower-back':
-      zBottom = bf; zTop = ff;
+      zBottom = bf; zTop = Math.max(bf, ff);
       anchorY = c.dontPegBottom ? bc : ff;
       break;
     default: return;
@@ -261,11 +261,11 @@ export function R_BuildWalls(scene) {
       // instead of revealing a wall standing against the sky.
       const skyToSky = front.ceilingpic === skyflatnum && back.ceilingpic === skyflatnum;
 
-      // Front upper.
-      if (frontCeiling > backCeiling && skyToSky !== true) {
+      // Front upper. r_segs.c:570 draws toptexture when worldhigh < worldtop.
+      if (sd0.toptexture > 0 && skyToSky !== true) {
         const texH = _texH(sd0.toptexture);
         const anchor = dontPegTop ? frontCeiling : (backCeiling + texH);
-        const r = pushQuad(opaqueBuckets, sd0.toptexture, x1, y1, x2, y2, backCeiling, frontCeiling,
+        const r = pushQuad(opaqueBuckets, sd0.toptexture, x1, y1, x2, y2, Math.min(frontCeiling, backCeiling), frontCeiling,
           sd0.textureoffset / 65536, anchor, sd0.rowoffset / 65536, baseLight, true, top, li);
         if (r !== null) {
           const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
@@ -274,13 +274,13 @@ export function R_BuildWalls(scene) {
           attachContrib(front, c); attachContrib(back, c);
         }
       }
-      // Front lower.
-      if (backFloor > frontFloor) {
+      // Front lower. r_segs.c:589 draws bottomtexture when worldlow > worldbottom.
+      if (sd0.bottomtexture > 0) {
         const texH = _texH(sd0.bottomtexture);
         // DONTPEGBOTTOM anchors at the front ceiling so the texture continues
         // through the lower section (vanilla r_segs.c rw_bottomtexturemid = worldtop).
         const anchor = dontPegBottom ? frontCeiling : backFloor;
-        const r = pushQuad(opaqueBuckets, sd0.bottomtexture, x1, y1, x2, y2, frontFloor, backFloor,
+        const r = pushQuad(opaqueBuckets, sd0.bottomtexture, x1, y1, x2, y2, frontFloor, Math.max(frontFloor, backFloor),
           sd0.textureoffset / 65536, anchor, sd0.rowoffset / 65536, baseLight, true, bottom, li);
         if (r !== null) {
           const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
@@ -311,10 +311,10 @@ export function R_BuildWalls(scene) {
       // Back side (mirror).
       const sd1 = sides[li.sidenum[1]];
       if (sd1 !== undefined) {
-        if (backCeiling > frontCeiling && skyToSky !== true) {
+        if (sd1.toptexture > 0 && skyToSky !== true) {
           const texH = _texH(sd1.toptexture);
           const anchor = dontPegTop ? backCeiling : (frontCeiling + texH);
-          const r = pushQuad(opaqueBuckets, sd1.toptexture, x1, y1, x2, y2, frontCeiling, backCeiling,
+          const r = pushQuad(opaqueBuckets, sd1.toptexture, x1, y1, x2, y2, frontCeiling, Math.max(frontCeiling, backCeiling),
             sd1.textureoffset / 65536, anchor, sd1.rowoffset / 65536, backLight, false);
           if (r !== null) {
             const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
@@ -323,10 +323,10 @@ export function R_BuildWalls(scene) {
             attachContrib(front, c); attachContrib(back, c);
           }
         }
-        if (frontFloor > backFloor) {
+        if (sd1.bottomtexture > 0) {
           const texH = _texH(sd1.bottomtexture);
           const anchor = dontPegBottom ? backCeiling : frontFloor;
-          const r = pushQuad(opaqueBuckets, sd1.bottomtexture, x1, y1, x2, y2, backFloor, frontFloor,
+          const r = pushQuad(opaqueBuckets, sd1.bottomtexture, x1, y1, x2, y2, backFloor, Math.max(backFloor, frontFloor),
             sd1.textureoffset / 65536, anchor, sd1.rowoffset / 65536, backLight, false);
           if (r !== null) {
             const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
