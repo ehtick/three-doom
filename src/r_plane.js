@@ -1,69 +1,95 @@
-// Ported from: linuxdoom-1.10/r_plane.c
-// Per-sector floor + ceiling triangulation using sector-loop earcut. Records
-// (mesh, vertexIndex range) per sector so opening doors / lifts can mutate
-// just the affected vertices.
+// Ported from: linuxdoom-1.10/r_bsp.c (R_Subsector) + r_plane.c.
+// Floors/ceilings built per subsector: clip a map-bound quad by each leaf's BSP
+// partition half-planes (root → leaf) to recover its convex polygon.
 
 import * as THREE from 'three';
-import { sectors, numsectors } from './p_setup.js';
+import { subsectors, numsubsectors, nodes, numnodes, vertexes, segs } from './p_setup.js';
+import { NF_SUBSECTOR } from './doomdata.js';
 import { R_GetFlatTexture, R_RegisterFlatMesh } from './r_data.js';
 import { R_MakeDoomMaterial } from './r_shader.js';
 import { skyflatnum } from './doomstat.js';
-import { earcut } from './earcut.js';
 
-// Sector → array of {mesh, kind:'floor'|'ceiling', startVertex, vertexCount}
+// sector → [{bucket, kind, startVertex, vertexCount}] for the by-sector updaters.
 const _sectorContribs = new Map();
 
-function extractSectorLoops(sector) {
-  const edges = [];
-  for (const li of sector.lines) {
-    if (li.frontsector === sector) edges.push([li.v2, li.v1]);
-    if (li.backsector  === sector) edges.push([li.v1, li.v2]);
-  }
-  const byStart = new Map();
-  for (const e of edges) {
-    if (!byStart.has(e[0])) byStart.set(e[0], []);
-    byStart.get(e[0]).push(e);
-  }
-  const loops = [];
-  const used = new Set();
-  for (const seed of edges) {
-    if (used.has(seed)) continue;
-    const loop = [seed[0]];
-    let cur = seed;
-    let safety = 0;
-    while (safety++ < 10000) {
-      used.add(cur);
-      loop.push(cur[1]);
-      if (cur[1] === loop[0]) break;
-      const list = byStart.get(cur[1]);
-      if (!list) break;
-      let nxt = null;
-      for (const e of list) if (!used.has(e)) { nxt = e; break; }
-      if (!nxt) break;
-      cur = nxt;
+// Sutherland–Hodgman clip by a node's partition half-plane (f<0 = side 0, right).
+function clipPolyByHalfplane(poly, nx, ny, dx, dy, keepNeg) {
+  const out = [];
+  const n = poly.length;
+  for (let i = 0; i < n; i++) {
+    const cur = poly[i], nxt = poly[(i + 1) % n];
+    const fc = dx * (cur.y - ny) - dy * (cur.x - nx);
+    const fn = dx * (nxt.y - ny) - dy * (nxt.x - nx);
+    const curIn = keepNeg ? fc <= 0 : fc >= 0;
+    const nxtIn = keepNeg ? fn <= 0 : fn >= 0;
+    if (curIn) out.push(cur);
+    if (curIn !== nxtIn) {
+      const t = fc / (fc - fn);
+      out.push({ x: cur.x + t * (nxt.x - cur.x), y: cur.y + t * (nxt.y - cur.y) });
     }
-    if (loop.length >= 4 && loop[loop.length - 1] === loop[0]) loops.push(loop.slice(0, -1));
   }
-  return loops;
+  return out;
 }
 
-function signedArea2D(pts) {
+// Drop near-duplicate vertices (avoids zero-area triangles).
+function cleanPoly(poly) {
+  const eps = 1 / 256;
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i];
+    const q = out.length > 0 ? out[out.length - 1] : null;
+    if (q !== null && Math.abs(p.x - q.x) < eps && Math.abs(p.y - q.y) < eps) continue;
+    out.push(p);
+  }
+  if (out.length >= 2) {
+    const a = out[0], b = out[out.length - 1];
+    if (Math.abs(a.x - b.x) < eps && Math.abs(a.y - b.y) < eps) out.pop();
+  }
+  return out;
+}
+
+// Shoelace signed area; positive == CCW (fans to a +Y floor normal).
+function polySignedArea(poly) {
   let s = 0;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    s += (pts[j].x - pts[i].x) * (pts[i].y + pts[j].y);
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    s += poly[j].x * poly[i].y - poly[i].x * poly[j].y;
   }
-  return s;
+  return s * 0.5;
 }
 
-function pointInPolygon(x, y, pts) {
-  let inside = false;
-  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-    const xi = pts[i].x / 65536, yi = pts[i].y / 65536;
-    const xj = pts[j].x / 65536, yj = pts[j].y / 65536;
-    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
+// No-node map: the lone leaf's segs already close the polygon.
+function polyFromSegs(sub) {
+  const pts = [];
+  for (let i = 0; i < sub.numlines; i++) {
+    const sg = segs[sub.firstline + i];
+    pts.push({ x: sg.v1.x / 65536, y: sg.v1.y / 65536 });
   }
-  return inside;
+  return cleanPoly(pts);
+}
+
+// Fan-triangulate a convex poly into its per-flat bucket; record it per sector.
+function pushConvexPoly(buckets, flatnum, sector, poly, height, reverse, kind) {
+  if (flatnum < 0) return;
+  let b = buckets.get(flatnum);
+  if (b === undefined) {
+    b = { positions: [], uvs: [], colors: [], indices: [] };
+    buckets.set(flatnum, b);
+  }
+  const startVertex = b.positions.length / 3;
+  const l = sector.lightlevel / 255;
+  for (let i = 0; i < poly.length; i++) {
+    const x = poly[i].x, y = poly[i].y;
+    b.positions.push(x, height, -y);
+    b.uvs.push(x / 64, y / 64);
+    b.colors.push(l, l, l);
+  }
+  for (let i = 1; i < poly.length - 1; i++) {
+    if (reverse) b.indices.push(startVertex, startVertex + i + 1, startVertex + i);
+    else         b.indices.push(startVertex, startVertex + i, startVertex + i + 1);
+  }
+  let arr = _sectorContribs.get(sector);
+  if (arr === undefined) { arr = []; _sectorContribs.set(sector, arr); }
+  arr.push({ bucket: b, kind, startVertex, vertexCount: poly.length });
 }
 
 export function R_BuildPlanes(scene) {
@@ -71,65 +97,72 @@ export function R_BuildPlanes(scene) {
   const floorBuckets   = new Map();
   const ceilingBuckets = new Map();
 
-  function pushOuterWithHoles(buckets, flatnum, sector, outer, holes, height, reverse, kind) {
-    if (flatnum < 0) return;
-    const data = [];
-    for (const v of outer) data.push(v.x / 65536, v.y / 65536);
-    const holeIdx = [];
-    for (const h of holes) {
-      holeIdx.push(data.length / 2);
-      for (const v of h) data.push(v.x / 65536, v.y / 65536);
+  // BSP is child-down only; record each node/leaf's parent + slot to walk up.
+  const parent       = new Int32Array(numnodes).fill(-1);
+  const parentSide   = new Int8Array(numnodes);
+  const ssParent     = new Int32Array(numsubsectors).fill(-1);
+  const ssParentSide = new Int8Array(numsubsectors);
+  for (let ni = 0; ni < numnodes; ni++) {
+    const node = nodes[ni];
+    for (let s = 0; s < 2; s++) {
+      const c = node.children[s];
+      if ((c & NF_SUBSECTOR) !== 0) {
+        ssParent[c & ~NF_SUBSECTOR] = ni;
+        ssParentSide[c & ~NF_SUBSECTOR] = s;
+      } else {
+        parent[c] = ni;
+        parentSide[c] = s;
+      }
     }
-    const tris = earcut(data, holeIdx.length ? holeIdx : undefined);
-    if (tris.length === 0) return;
-    let b = buckets.get(flatnum);
-    if (b === undefined) {
-      b = { positions: [], uvs: [], colors: [], indices: [] };
-      buckets.set(flatnum, b);
-    }
-    const startVertex = b.positions.length / 3;
-    for (let i = 0; i < data.length; i += 2) {
-      const x = data[i], y = data[i + 1];
-      b.positions.push(x, height, -y);
-      b.uvs.push(x / 64, y / 64);
-      const l = sector.lightlevel / 255;
-      b.colors.push(l, l, l);
-    }
-    for (let i = 0; i < tris.length; i += 3) {
-      if (reverse) b.indices.push(startVertex + tris[i], startVertex + tris[i + 2], startVertex + tris[i + 1]);
-      else         b.indices.push(startVertex + tris[i], startVertex + tris[i + 1], startVertex + tris[i + 2]);
-    }
-    const vertexCount = data.length / 2;
-    let arr = _sectorContribs.get(sector);
-    if (arr === undefined) { arr = []; _sectorContribs.set(sector, arr); }
-    arr.push({ bucket: b, kind, startVertex, vertexCount });
   }
 
-  for (let i = 0; i < numsectors; i++) {
-    const sector = sectors[i];
-    const loops = extractSectorLoops(sector);
-    if (loops.length === 0) continue;
-    const classified = loops.map(loop => ({ loop, area: signedArea2D(loop) }));
-    classified.sort((a, b) => Math.abs(b.area) - Math.abs(a.area));
-    const outers = [];
-    for (const c of classified) if (c.area > 0) outers.push({ loop: c.loop, holes: [] });
-    for (const c of classified) {
-      if (c.area < 0) {
-        const px = c.loop[0].x, py = c.loop[0].y;
-        for (const o of outers) {
-          if (pointInPolygon(px, py, o.loop)) { o.holes.push(c.loop); break; }
-        }
+  // Map-bound quad seed (CCW); outer walls are partition lines, so it never leaks.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < vertexes.length; i++) {
+    const vx = vertexes[i].x / 65536, vy = vertexes[i].y / 65536;
+    if (vx < minX) minX = vx;
+    if (vx > maxX) maxX = vx;
+    if (vy < minY) minY = vy;
+    if (vy > maxY) maxY = vy;
+  }
+  const pad = 8;
+  minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+
+  for (let ssi = 0; ssi < numsubsectors; ssi++) {
+    const sub = subsectors[ssi];
+    const sector = sub.sector;
+    if (sector === null || sector === undefined) continue;
+
+    let poly;
+    if (numnodes === 0) {
+      poly = polyFromSegs(sub);
+    } else {
+      poly = [
+        { x: minX, y: minY }, { x: maxX, y: minY },
+        { x: maxX, y: maxY }, { x: minX, y: maxY },
+      ];
+      let n = ssParent[ssi], side = ssParentSide[ssi];
+      while (n !== -1) {
+        const node = nodes[n];
+        poly = clipPolyByHalfplane(poly, node.x / 65536, node.y / 65536,
+          node.dx / 65536, node.dy / 65536, side === 0);
+        if (poly.length < 3) break;
+        side = parentSide[n];
+        n = parent[n];
       }
+      poly = cleanPoly(poly);
     }
-    for (const o of outers) {
-      if (sector.floorpic !== skyflatnum) {
-        pushOuterWithHoles(floorBuckets, sector.floorpic, sector, o.loop, o.holes,
-          sector.floorheight / 65536, false, 'floor');
-      }
-      if (sector.ceilingpic !== skyflatnum) {
-        pushOuterWithHoles(ceilingBuckets, sector.ceilingpic, sector, o.loop, o.holes,
-          sector.ceilingheight / 65536, true, 'ceiling');
-      }
+    if (poly === null || poly.length < 3) continue;
+    // Keep CCW so the floor fan faces +Y.
+    if (polySignedArea(poly) < 0) poly.reverse();
+
+    if (sector.floorpic !== skyflatnum) {
+      pushConvexPoly(floorBuckets, sector.floorpic, sector, poly,
+        sector.floorheight / 65536, false, 'floor');
+    }
+    if (sector.ceilingpic !== skyflatnum) {
+      pushConvexPoly(ceilingBuckets, sector.ceilingpic, sector, poly,
+        sector.ceilingheight / 65536, true, 'ceiling');
     }
   }
 
