@@ -204,8 +204,10 @@ export function G_PlayerReborn(playernum) {
 // g_game.c:922 — G_DoReborn. (Netgame respawn-at-start is not ported.)
 export function G_DoReborn(playernum) {
   if (doomstat.netgame === false) {
-    G_PlayerReborn(playernum);
-    set_gameaction(gameaction_t.ga_loadlevel); // reload the level from scratch
+    // g_game.c:928 — reload the level from scratch. The loadout reset happens at
+    // spawn time via P_SpawnPlayer's PST_REBORN gate (the player is already
+    // PST_REBORN here, set by P_DeathThink on the respawn keypress).
+    set_gameaction(gameaction_t.ga_loadlevel);
   }
 }
 

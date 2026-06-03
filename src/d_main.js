@@ -531,22 +531,38 @@ export async function D_DoomMain() {
   const MTF_MULTI  = 16;
   // ds module (pre-imported so the spawn callback stays synchronous).
   const ds = await import('./doomstat.js');
+  // p_mobj.c:642 — P_SpawnPlayer. Most of the player structure stays
+  // unchanged between levels.
+  const P_SpawnPlayer = (mt) => {
+    // not playing?
+    if (doomstat.playeringame[mt.type - 1] !== true) return;
+    const p = doomstat.players[mt.type - 1];
+    if (p === null || p === undefined) return;
+    if (p.playerstate === 2 /*PST_REBORN*/) _GGame.G_PlayerReborn(mt.type - 1);
+    const mobj = P_SpawnMobj(mt.x << 16, mt.y << 16, ONFLOORZ, 0 /*MT_PLAYER*/);
+    // set color translations for player sprites (netgame/co-op only)
+    if (mt.type > 1) mobj.flags |= (mt.type - 1) << _PMobj.MF_TRANSSHIFT;
+    mobj.angle = (((mt.angle / 45) | 0) * 0x20000000) >>> 0;
+    mobj.player = p;
+    mobj.health = p.health;
+    p.mo = mobj;
+    p.playerstate = 0 /*PST_LIVE*/;
+    p.refire = 0;
+    p.message = null;
+    p.damagecount = 0;
+    p.bonuscount = 0;
+    p.extralight = 0;
+    p.fixedcolormap = 0;
+    p.viewheight = _PU.VIEWHEIGHT;
+    // P_SetupPsprites runs from loadLevel (async); cards/ST_Start/HU_Start are SP no-ops.
+  };
   // p_mobj.c:704 — P_SpawnMapThing.
   const P_SpawnMapThing = (mt) => {
-    // Player starts (1..4) — spawn the mobj for player 1 here so its thinker
-    // lands at the same list position as vanilla. Other player slots only
-    // record the start position (for respawn / netgame).
+    // Player starts (1..4): playerstarts[] are recorded in P_LoadThings; spawn
+    // the player mobj (single-player) at the type-1 mapthing moment so its
+    // thinker lands at the same list position as vanilla.
     if (mt.type >= 1 && mt.type <= 4) {
-      if (mt.type === 1) {
-        const p = globalThis.__doom_playerForSpawn;
-        if (p !== null && p !== undefined && p.mo === null) {
-          const playerMo = P_SpawnMobj(mt.x << 16, mt.y << 16, ONFLOORZ, 0 /*MT_PLAYER*/);
-          playerMo.angle = (((mt.angle / 45) | 0) * 0x20000000) >>> 0;
-          playerMo.player = p;
-          p.mo = playerMo;
-          p.health = 100;
-        }
-      }
+      if (ds.deathmatch === 0) P_SpawnPlayer(mt); // p_mobj.c:733 — !deathmatch
       return null;
     }
     // Deathmatch start (type 11) — recorded elsewhere.
@@ -616,11 +632,18 @@ export async function D_DoomMain() {
     // the player mobj LAST diverges monster→player thinker ordering, which
     // shifts P_Random consumption and desyncs demos.)
     _PU.P_UserSetExternals({ r_bsp: _RB, p_mobj: _PMobj, gamemode: doomstat.gamemode });
-    const player = _PU.makePlayer();
-    doomstat.players[0] = player;
+    // p_mobj.c:638 — reuse the existing player_t so weapons/ammo/armor/keys/
+    // health carry over between levels; allocate one only on the first load
+    // (boot / new game). A fresh struct starts PST_REBORN so P_SpawnPlayer's
+    // gate runs G_PlayerReborn for the initial loadout — matching G_InitNew.
+    let player = doomstat.players[0];
+    if (player === null || player === undefined) {
+      player = _PU.makePlayer();
+      player.playerstate = 2 /*PST_REBORN*/;
+      doomstat.players[0] = player;
+    }
     doomstat.playeringame[0] = true;
-    // Stash the player_t so P_SpawnMapThing can find it when type==1 is hit.
-    globalThis.__doom_playerForSpawn = player;
+    player.mo = null; // drop the previous level's mobj link before respawn
     // P_SetupLevel internally runs P_InitThinkers BEFORE P_LoadThings and
     // P_SpawnSpecials AFTER, matching p_setup.c's ordering.
     P_SetupLevel(episode, map, 0, skill);
@@ -630,13 +653,7 @@ export async function D_DoomMain() {
     // crash on a null player.mo.
     if (player.mo === null) {
       const ps = doomstat.playerstarts[0];
-      if (ps !== undefined) {
-        const playerMo = PM.P_SpawnMobj(ps.x << 16, ps.y << 16, PM.ONFLOORZ, 0);
-        playerMo.angle = (((ps.angle / 45) | 0) * 0x20000000) >>> 0;
-        playerMo.player = player;
-        player.mo = playerMo;
-        player.health = 100;
-      }
+      if (ps !== undefined) P_SpawnPlayer({ ...ps, type: 1 }); // corrupt-map fallback
     }
     _PTick.P_SetExternals({
       P_PlayerThink: _PU.P_PlayerThink,
@@ -647,7 +664,6 @@ export async function D_DoomMain() {
     // it but don't block — psprites are visual only, not part of the play sim.
     _PU.P_SetupPsprites(player);
     D_KeyboardInput.init(player);
-    globalThis.__doom_playerForSpawn = null;
   };
   // Expose to G_DoLoadLevel callers (menu New Game) — see g_game.js setExternals.
   if (_GGame.G_SetExternals) _GGame.G_SetExternals({ loadLevel });
