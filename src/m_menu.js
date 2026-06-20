@@ -32,6 +32,8 @@ V_RegisterPNGPatch('M_CONT', './M_CONT.png');
 let _currentMenu = null;
 let _selected    = 0;
 let _menuStack   = [];
+// Last M_Drawer letterbox geometry, used by M_HandleTap to invert a tap.
+let _lastLayout  = null;
 
 // m_menu.c:129 — LINEHEIGHT.
 const LINE_HEIGHT = 16;
@@ -359,6 +361,51 @@ export function M_Responder(ev) {
   return true;
 }
 
+// Touch/pointer tap handling for mobile. (px,py) are overlay window pixels;
+// returns true when the tap was consumed.
+export function M_HandleTap(px, py) {
+  if (menuactive !== true) return false;
+  // Modal y/n prompts stay keyboard-only so a stray tap can't confirm a quit.
+  if (_message !== null) return true;
+  const m = _currentMenu;
+  if (m === null || _lastLayout === null) return true;
+  const { lx, ly, sx, sy } = _lastLayout;
+  // Window pixels → Doom 320x200 menu space.
+  const dx = (px - lx) / sx;
+  const dy = (py - ly) / sy;
+  // Help pages advance on a tap anywhere ("any key").
+  if (m.fullscreen) {
+    const it = m.items[0];
+    if (it !== undefined && it.action != null) { it.action(); S_StartSound(null, sfx_pistol); }
+    return true;
+  }
+  // A tap off the rows backs out one level (closing at the root) — the
+  // touch stand-in for ESC, which mobile users have no key for.
+  const row = (dx < 0 || dx > 320) ? -1 : Math.floor((dy - m.y) / LINE_HEIGHT);
+  if (row < 0 || row >= m.items.length) {
+    if (M_Back() !== true) { M_ClearMenus(); S_StartSound(null, sfx_swtchx); }
+    return true;
+  }
+  let idx = row;
+  let it = m.items[idx];
+  // A slider's thermo sits on the spacer row below its label — redirect there.
+  if (it.spacer === true && idx > 0 && m.items[idx - 1].slider === true) {
+    idx -= 1; it = m.items[idx];
+  }
+  if (it.spacer === true) return true;
+  if (idx !== _selected) { _selected = idx; S_StartSound(null, sfx_pstop); }
+  if (it.slider === true) {
+    // Knob is at doom-x (m.x + 8) + value*8; tap left lowers, right raises.
+    const knobX = m.x + 8 + it.get() * 8 + 4;
+    it.set(dx < knobX ? it.get() - 1 : it.get() + 1);
+    S_StartSound(null, sfx_stnmov);
+  } else if (it.action != null) {
+    it.action();
+    S_StartSound(null, sfx_pistol);
+  }
+  return true;
+}
+
 // ---------- Drawer ----------
 const drawPatchAt = V_DrawPatchAtCanvas;
 
@@ -402,6 +449,7 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   const sx = scale, sy = scale;
   const lx = dstX + (dstW - 320 * scale) * 0.5;
   const ly = dstY + (dstH - 200 * scale) * 0.5;
+  _lastLayout = { lx, ly, sx, sy };
   // Background dim only when not over title screen.
   if (gamestate === 0 /*GS_LEVEL*/) {
     overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
