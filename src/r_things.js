@@ -219,7 +219,7 @@ export function R_RegisterMobjSprite(mobj) {
   // Bare sprite — texture/scale/position set on first R_UpdateSprites pass.
   // We use a placeholder material so the sprite is valid even before the
   // first update; R_UpdateSprites overwrites .map immediately.
-  const mat = new THREE.SpriteMaterial({ transparent: true, alphaTest: 0.5, depthWrite: true });
+  const mat = new THREE.SpriteMaterial({ transparent: true, alphaTest: SPRITE_ALPHATEST, depthWrite: true });
   const sprite = new THREE.Sprite(mat);
   // Hide until R_UpdateSprites positions it — avoids a single-frame flash
   // at (0,0,0) for newly-spawned mobjs.
@@ -244,6 +244,13 @@ const SHADOW_TINT    = 0.12; // near-black silhouette (fuzz samples a dark color
 const SHADOW_OPACITY = 0.33; // base translucency
 const SHADOW_FLICKER = 0.09; // +/- per-frame opacity shimmer
 const SHADOW_JITTER  = 1.5;  // vertical position shimmer, in map units
+// Below the opacity floor (SHADOW_OPACITY - SHADOW_FLICKER = 0.24) so silhouette
+// texels pass, above 0 so the transparent surround is still discarded.
+const SHADOW_ALPHATEST = 0.1;
+// Default cutout for fully opaque sprites: keep solid texels, drop the
+// transparent surround. Shared by the material constructor and the shadow
+// restore path so they can't drift apart.
+const SPRITE_ALPHATEST = 0.5;
 
 export function R_UpdateSprites() {
   for (const entry of _liveSprites) {
@@ -317,9 +324,16 @@ export function R_UpdateSprites() {
       if (isShadow) {
         mat.depthWrite = false; // translucent: don't occlude what's behind it
         mat.color.setRGB(SHADOW_TINT, SHADOW_TINT, SHADOW_TINT);
+        // The default alphaTest (0.5) compares against texAlpha * opacity. At
+        // SHADOW_OPACITY (~0.33) every silhouette texel falls under 0.5 and gets
+        // discarded — the Spectre vanishes entirely. Drop the threshold below the
+        // flickering opacity floor so the silhouette survives, while the fully
+        // transparent surround (alpha 0) is still culled.
+        mat.alphaTest = SHADOW_ALPHATEST;
       } else {
         mat.opacity = 1;
         mat.depthWrite = true;
+        mat.alphaTest = SPRITE_ALPHATEST; // restore the opaque-sprite cutout
         entry._lastLight = -1; // force the light tint below to re-apply
       }
       mat.needsUpdate = true;
