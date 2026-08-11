@@ -455,6 +455,7 @@ export async function D_DoomMain() {
   const S = await import('./s_sound.js');
   S.S_Init(8, 8);
   const PM = await import('./p_mobj.js');
+  PM.P_MobjSetDoomstat(doomstat);
   PM.P_SetExternals({
     S_StartSound: S.S_StartSound,
     S_StopSound:  S.S_StopSound,
