@@ -9,7 +9,7 @@ import { P_SetMobjState, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, M
 import { P_TeleportMove, P_CheckPosition } from './p_map.js';
 import { P_BlockThingsIterator } from './p_maputl.js';
 import { bmaporgx, bmaporgy } from './p_setup.js';
-import { players, consoleplayer, playeringame, gameepisode, gamemap, gamemode, gameskill, gametic, fastparm } from './doomstat.js';
+import { players, consoleplayer, playeringame, gameepisode, gamemap, gamemode, gameskill, gametic, fastparm, netgame } from './doomstat.js';
 import { GameMode_t } from './doomdef.js';
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine } from './tables.js';
 import { P_CheckSight } from './p_sight.js';
@@ -19,6 +19,7 @@ import { sfx_claw, sfx_slop } from './sounds.js';
 import { EV_DoFloor, lowerFloorToLowest, raiseToTexture } from './p_floor.js';
 import { EV_DoDoor } from './p_doors.js';
 import { P_Random } from './m_random.js';
+import { A_Chase } from './p_enemy_chase.js';
 
 // External wiring.
 let _S = null;
@@ -284,65 +285,27 @@ function P_CheckMissileRange(actor) {
   return true;
 }
 
+// Stable production dependencies for the separately testable A_Chase action.
+// Accessors preserve the live skill, netgame, and sound-system bindings.
+const chaseDeps = {
+  get gameskill() { return gameskill; },
+  get fastparm() { return fastparm; },
+  get netgame() { return netgame; },
+  MF_SHOOTABLE,
+  MF_JUSTATTACKED,
+  P_CheckSight,
+  P_LookForPlayers,
+  P_CheckMeleeRange,
+  P_CheckMissileRange,
+  P_SetMobjState,
+  P_Move,
+  P_NewChaseDir,
+  P_Random,
+  get S() { return _S; },
+};
+
 // p_enemy.c — A_Chase.
-const ANG90_C = 0x40000000;
-P_RegisterAction('A_Chase', (actor) => {
-  if (actor.reactiontime > 0) actor.reactiontime--;
-  // Threshold tick.
-  if (actor.threshold > 0) {
-    if (actor.target === null || actor.target.health <= 0) actor.threshold = 0;
-    else actor.threshold--;
-  }
-  // Turn toward movedir (snap by 22.5° each tic — vanilla angle &= 7<<29 trick).
-  if (actor.movedir < 8) {
-    actor.angle = (actor.angle & ((7 << 29) >>> 0)) >>> 0;
-    const delta = ((actor.angle - ((actor.movedir << 29) >>> 0)) | 0);
-    if (delta > 0) actor.angle = (actor.angle - (ANG90_C >>> 1)) >>> 0;
-    else if (delta < 0) actor.angle = (actor.angle + (ANG90_C >>> 1)) >>> 0;
-  }
-  // Acquire / re-acquire target. Vanilla calls P_LookForPlayers(allaround=true).
-  if (actor.target === null || (actor.target.flags & MF_SHOOTABLE) === 0) {
-    if (P_LookForPlayers(actor, true)) return;
-    P_SetMobjState(actor, actor.info.spawnstate);
-    return;
-  }
-  // Don't attack twice in a row.
-  if ((actor.flags & MF_JUSTATTACKED) !== 0) {
-    actor.flags &= ~MF_JUSTATTACKED;
-    // Vanilla: !sk_nightmare && !fastparm → re-pick chase dir.
-    if (gameskill !== 4 /*sk_nightmare*/ && !fastparm) P_NewChaseDir(actor);
-    return;
-  }
-  // Melee attack.
-  if (actor.info.meleestate !== 0 && P_CheckMeleeRange(actor)) {
-    if (actor.info.attacksound !== 0 && _S !== null) _S.S_StartSound(actor, actor.info.attacksound);
-    P_SetMobjState(actor, actor.info.meleestate);
-    return;
-  }
-  // Missile attack.
-  let didMissile = false;
-  if (actor.info.missilestate !== 0) {
-    // Vanilla p_enemy.c:719 — `gameskill < sk_nightmare && !fastparm && actor->movecount`
-    // skips the missile check. The C `actor->movecount` is a non-zero test, so
-    // movecount === -1 (after the previous tic's --movecount underflow) still
-    // skips. Use a non-zero test, not `> 0`, to match.
-    const movecountGate = (gameskill < 4 /*sk_nightmare*/ && !fastparm && actor.movecount !== 0);
-    if (!movecountGate && P_CheckMissileRange(actor)) {
-      P_SetMobjState(actor, actor.info.missilestate);
-      actor.flags |= MF_JUSTATTACKED;
-      return;
-    }
-    // movecountGate or missilerange failed → fall through to chase.
-  }
-  // Chase toward target.
-  if (--actor.movecount < 0 || !P_Move(actor)) {
-    P_NewChaseDir(actor);
-  }
-  // Active sound (random).
-  if (actor.info.activesound !== 0 && _S !== null && P_Random() < 3) {
-    _S.S_StartSound(actor, actor.info.activesound);
-  }
-});
+P_RegisterAction('A_Chase', (actor) => A_Chase(actor, chaseDeps));
 
 // A_Pain — play pain sound.
 P_RegisterAction('A_Pain', (actor) => {
