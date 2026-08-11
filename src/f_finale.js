@@ -12,13 +12,17 @@ import {
 import { GameMode_t, gamestate_t } from './doomdef.js';
 import { gameaction_t } from './d_event.js';
 import { V_DecodePatchToCanvas } from './v_video.js';
-import { S_ChangeMusic, S_StartMusic } from './s_sound.js';
+import { S_ChangeMusic, S_StartMusic, S_StartSound } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
-import { W_CacheLumpNum, W_CheckNumForName } from './w_wad.js';
-import { playpal_rgba } from './r_data.js';
+import { W_CacheLumpNum, W_CheckNumForName, lumpinfo } from './w_wad.js';
+import { firstspritelump, playpal_rgba } from './r_data.js';
+import { sprites } from './r_things.js';
 import {
   F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
 } from './f_finale_logic.js';
+import {
+  F_CreateCastState, F_GetCastDisplay, F_KillCast, F_TickCast,
+} from './f_cast_logic.js';
 
 // State machine: 0 = typing text, 1 = post-text still / bunny scroll.
 let _stage = 0;
@@ -203,52 +207,27 @@ export function F_isActive() { return _active; }
 // through their attack animation. Shareware doom1.wad has no MAP30 to trigger
 // it, but the functions are here for source-map parity with f_finale.c.
 
-// f_finale.c:118 — castorder[]. HERO is the FINAL entry (the loop runs
-// monsters first, hero last).
-const CAST_ORDER = [
-  { name: 'ZOMBIEMAN',             spr: 'POSS', type: 39 },
-  { name: 'SHOTGUN GUY',           spr: 'SPOS', type: 40 },
-  { name: 'HEAVY WEAPON DUDE',     spr: 'CPOS', type: 41 },
-  { name: 'IMP',                   spr: 'TROO', type: 2  },
-  { name: 'DEMON',                 spr: 'SARG', type: 42 },
-  { name: 'LOST SOUL',             spr: 'SKUL', type: 18 },
-  { name: 'CACODEMON',             spr: 'HEAD', type: 17 },
-  { name: 'HELL KNIGHT',           spr: 'BOS2', type: 16 },
-  { name: 'BARON OF HELL',         spr: 'BOSS', type: 15 },
-  { name: 'ARACHNOTRON',           spr: 'BSPI', type: 20 },
-  { name: 'PAIN ELEMENTAL',        spr: 'PAIN', type: 22 },
-  { name: 'REVENANT',              spr: 'SKEL', type: 7  },
-  { name: 'MANCUBUS',              spr: 'FATT', type: 8  },
-  { name: 'ARCH-VILE',             spr: 'VILE', type: 3  },
-  { name: 'THE SPIDER MASTERMIND', spr: 'SPID', type: 19 },
-  { name: 'THE CYBERDEMON',        spr: 'CYBR', type: 21 },
-  { name: 'OUR HERO',              spr: 'PLAY', type: 38 /*MT_PLAYER*/ },
-];
-let _castNum = 0, _castFrame = 0, _castTics = 0, _castActive = false, _castAttacking = false;
+let _cast = null;
+let _castActive = false;
 
-export function F_StartCast() { _castActive = true; _castNum = 0; _castFrame = 0; _castTics = 35; _castAttacking = false; S_ChangeMusic(mus_evil, true); /* f_finale.c:388 */ }
+export function F_StartCast() {
+  _castActive = true;
+  _cast = F_CreateCastState();
+  S_ChangeMusic(mus_evil, true);
+}
 export function F_CastTicker() {
-  if (!_castActive) return;
-  if (--_castTics > 0) return;
-  _castFrame = (_castFrame + 1) & 3;
-  _castTics = 12;
-  // After ~3 seconds, swing to the next monster.
-  if (_castFrame === 0) {
-    _castNum = (_castNum + 1) % CAST_ORDER.length;
-    _castAttacking = false;
-  }
+  if (!_castActive || _cast === null) return;
+  const sound = F_TickCast(_cast);
+  if (sound !== 0) S_StartSound(null, sound);
 }
 export function F_CastResponder(ev) {
-  if (!_castActive) return false;
-  if (ev && ev.type === 0) {
-    _castNum = (_castNum + 1) % CAST_ORDER.length;
-    _castFrame = 0; _castTics = 12;
-    return true;
-  }
-  return false;
+  if (!_castActive || _cast === null || ev?.type !== 0) return false;
+  const sound = F_KillCast(_cast);
+  if (sound !== 0) S_StartSound(null, sound);
+  return true;
 }
 export function F_CastDrawer(ctx, dx, dy, dw, dh) {
-  if (!_castActive) return;
+  if (!_castActive || _cast === null) return;
   const sx = dw / 320, sy = dh / 200;
   ctx.fillStyle = '#000';
   ctx.fillRect(dx, dy, dw, dh);
@@ -256,18 +235,30 @@ export function F_CastDrawer(ctx, dx, dy, dw, dh) {
   const bg = getPatch('BOSSBACK');
   if (bg !== null) ctx.drawImage(bg.canvas, dx, dy, bg.w * sx, bg.h * sy);
   // Monster name as a centred label.
-  const cast = CAST_ORDER[_castNum];
+  const cast = F_GetCastDisplay(_cast);
   ctx.fillStyle = '#ffcf00';
   ctx.font = `bold ${Math.round(dh * 0.06)}px monospace`;
   ctx.textAlign = 'center';
   ctx.fillText(cast.name, dx + dw * 0.5, dy + dh * 0.92);
-  // Sprite — first idle frame, rotation 0 (front).
-  const sprName = cast.spr + String.fromCharCode(65 + (_castFrame & 3)) + '0'; // e.g. POSSA0
-  const sp = getPatch(sprName);
+  // f_finale.c:F_CastDrawer selects rotation 0 from the actual spriteframe,
+  // including its flip bit; names such as POSSA0 cannot represent every state.
+  const spriteDef = sprites?.[cast.state.sprite];
+  const spriteFrame = spriteDef?.spriteframes?.[cast.state.frame & 0x7fff];
+  const relativeLump = spriteFrame?.lump?.[0] ?? -1;
+  const lump = relativeLump < 0 ? null : lumpinfo[firstspritelump + relativeLump];
+  const sp = lump === null || lump === undefined ? null : getPatch(lump.name);
   if (sp !== null) {
     const x = dx + (160 - sp.leftoffset) * sx;
     const y = dy + (170 - sp.topoffset)  * sy;
-    ctx.drawImage(sp.canvas, x, y, sp.w * sx, sp.h * sy);
+    if (spriteFrame.flip[0] === 1) {
+      ctx.save();
+      ctx.translate(x + sp.w * sx, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(sp.canvas, 0, 0, sp.w * sx, sp.h * sy);
+      ctx.restore();
+    } else {
+      ctx.drawImage(sp.canvas, x, y, sp.w * sx, sp.h * sy);
+    }
   }
   ctx.textAlign = 'left';
 }
