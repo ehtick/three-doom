@@ -76,7 +76,7 @@ function pushConvexPoly(buckets, flatnum, sector, poly, height, reverse, kind) {
     buckets.set(flatnum, b);
   }
   const startVertex = b.positions.length / 3;
-  const l = sector.lightlevel / 255;
+  const l = sector.lightlevel >> 4;
   for (let i = 0; i < poly.length; i++) {
     const x = poly[i].x, y = poly[i].y;
     b.positions.push(x, height, -y);
@@ -216,7 +216,7 @@ export function R_UpdateSectorPlanes(sector) {
 export function R_UpdateSectorLight(sector) {
   const arr = _sectorContribs.get(sector);
   if (arr !== undefined) {
-    const l = sector.lightlevel / 255;
+    const l = sector.lightlevel >> 4;
     for (const c of arr) {
       const col = c.bucket.mesh.geometry.attributes.color;
       for (let i = 0; i < c.vertexCount; i++) {

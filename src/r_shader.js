@@ -82,14 +82,21 @@ export function R_MakeIndexedTexture(indices, alphas, w, h) {
   return tex;
 }
 
-// extralight is a shared uniform (weapon flash / light-amp visor add a
-// brightness boost across all geometry). Updated from p_user.P_PlayerThink.
+// Per-view lighting is shared by every world material. R_SetupFrame updates
+// these once before rendering, just as vanilla sets its renderer globals.
 export const extralightUniform = { value: 0 };
+const viewFixedColormapUniform = { value: -1 };
+
+export function R_SetViewLighting(extralight, fixedColormap) {
+  extralightUniform.value = extralight;
+  // player.fixedcolormap uses 0 as "disabled"; shader -1 selects normal
+  // distance lighting, while positive values are literal COLORMAP rows.
+  viewFixedColormapUniform.value = fixedColormap === 0 ? -1 : fixedColormap;
+}
 
 // Sector-light range: vanilla snaps the 0..255 sector.lightlevel to one of
-// 16 buckets (>> LIGHTSEGSHIFT). We pass the snapped index directly via
-// vertex colour so each sector gets a consistent bucket regardless of
-// per-vertex interpolation.
+// 16 buckets (>> LIGHTSEGSHIFT). Vertex colour carries that signed bucket so
+// wall contrast survives until extralight is added and the result is clamped.
 
 const VERT_SHADER = /* glsl */ `
 varying vec2 vUv;
@@ -106,8 +113,9 @@ void main() {
 `;
 
 // Fragment shader applies the vanilla scalelight formula:
+//   lightIdx = clamp((lightlevel >> 4) + extralight, 0, 15)
 //   startMap = (15 - lightIdx) * 4
-//   row      = clamp(startMap + distMap - extralight, 0, 31)
+//   row      = clamp(startMap + distance adjustment, 0, 31)
 // distMap stands in for vanilla's j (the screen-scale index). We pick a
 // per-unit scale that matches vanilla's perceived fall-off in a typical
 // Doom room. Final colour is paletteTex[colormapTex[texIdx, row]].
@@ -142,10 +150,10 @@ void main() {
     // (~ 12 rows). Vanilla: level = startMap - j/4 with j=0 (far) yielding
     // startMap and j=47 (close) yielding startMap-11.75. We replace -j/4
     // with (distMap - 12); distMap saturates to ~12 at far range.
-    float lightIdx = floor(vColor.r * 15.0 + 0.001);   // 0..15
+    float lightIdx = clamp(vColor.r + extralight, 0.0, 15.0);
     float startMap = (15.0 - lightIdx) * 4.0;          // 0..60 (vanilla far-end darkness)
     float distMap  = clamp(vViewDepth * (12.0 / 1024.0), 0.0, 12.0);
-    row = clamp(startMap + distMap - 12.0 - extralight * 8.0, 0.0, 31.0);
+    row = clamp(startMap + distMap - 12.0, 0.0, 31.0);
   }
 
   // Sample the colormap remap: x = palIdx, y = row/(rows-1) for 34 rows.
@@ -170,7 +178,7 @@ export function R_MakeDoomMaterial(map, { masked = false, side = THREE.FrontSide
       palette:       { value: _paletteTex },
       colormap:      { value: _colormapTex },
       extralight:    extralightUniform,
-      fixedColormap: { value: fixedColormap },
+      fixedColormap: fixedColormap >= 0 ? { value: fixedColormap } : viewFixedColormapUniform,
       masked:        { value: masked },
     },
     vertexShader:   VERT_SHADER,

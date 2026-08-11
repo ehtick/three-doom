@@ -129,7 +129,7 @@ export function R_UpdateSectorWalls(sector) {
 // lightlevel changes. Mirrors the build-time fake-contrast bake.
 function updateContribLight(c) {
   if (c.bucket === undefined || c.bucket.mesh === undefined) return;
-  const light = Math.max(0, Math.min(255, c.lightSector.lightlevel + c.contrast)) / 255;
+  const light = (c.lightSector.lightlevel >> 4) + c.contrast;
   const col = c.bucket.mesh.geometry.attributes.color;
   for (let i = 0; i < 4; i++) col.setXYZ(c.baseIdx + i, light, light, light);
   col.needsUpdate = true;
@@ -167,7 +167,7 @@ export function R_BuildWalls(scene) {
   // switchSlot/switchLine (optional) mark a front-side switch surface: it gets
   // its own private bucket and is recorded in _switchWalls for runtime swapping.
   function pushQuad(buckets, texnum, x1, y1, x2, y2, zBottom, zTop,
-                    uOffset, anchorY, rowoffset, lightlevel, frontFacing,
+                    uOffset, anchorY, rowoffset, lightBucket, frontFacing,
                     switchSlot, switchLine) {
     if (texnum <= 0) return null;
     const tex = textures[texnum];
@@ -201,8 +201,7 @@ export function R_BuildWalls(scene) {
     } else {
       b.uvs.push(u1, vBottom, u0, vBottom, u0, vTop, u1, vTop);
     }
-    const light = lightlevel / 255;
-    for (let i = 0; i < 4; i++) b.colors.push(light, light, light);
+    for (let i = 0; i < 4; i++) b.colors.push(lightBucket, lightBucket, lightBucket);
     if (frontFacing === true) {
       b.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
     } else {
@@ -236,13 +235,13 @@ export function R_BuildWalls(scene) {
     const dontPegTop    = (li.flags & ML_DONTPEGTOP)    !== 0;
     const dontPegBottom = (li.flags & ML_DONTPEGBOTTOM) !== 0;
 
-    // Fake contrast — r_segs.c R_RenderSegLoop: horizontal lines get
-    // lightlevel-16, vertical lines get lightlevel+16. Computed once per
+    // Fake contrast — r_segs.c R_RenderSegLoop: horizontal lines get light
+    // bucket -1, vertical lines get light bucket +1. Computed once per
     // linedef in vanilla; baked into per-quad vertex colors here.
     let contrast = 0;
-    if (li.v1.y === li.v2.y)      contrast = -16;
-    else if (li.v1.x === li.v2.x) contrast = 16;
-    const baseLight = Math.max(0, Math.min(255, lightlevel + contrast));
+    if (li.v1.y === li.v2.y)      contrast = -1;
+    else if (li.v1.x === li.v2.x) contrast = 1;
+    const baseLight = (lightlevel >> 4) + contrast;
 
     if ((li.flags & ML_TWOSIDED) === 0 || li.backsector === null) {
       const texH = _texH(sd0.midtexture);
@@ -258,7 +257,7 @@ export function R_BuildWalls(scene) {
       const back = li.backsector;
       const backFloor   = back.floorheight   / 65536;
       const backCeiling = back.ceilingheight / 65536;
-      const backLight = Math.max(0, Math.min(255, back.lightlevel + contrast));
+      const backLight = (back.lightlevel >> 4) + contrast;
 
       // r_segs.c:530-534 — "hack to allow height changes in outdoor areas":
       // when both sectors' ceilings are the sky flat, vanilla skips the upper

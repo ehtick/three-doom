@@ -13,6 +13,7 @@ import { R_BuildSpriteBillboards, R_ClearSpriteCache, set_view as set_thing_view
 import { R_ClearMeshRegistry } from './r_data.js';
 import { R_BuildSky, R_UpdateSky } from './r_sky.js';
 import { R_PointInSubsector } from './r_bsp.js';
+import { R_SetViewLighting } from './r_shader.js';
 import { segs } from './p_setup.js';
 import { ML_MAPPED } from './doomdata.js';
 
@@ -57,6 +58,7 @@ function bamToRad(bam) {
 export function R_SetupFrame(player) {
   if (player === null || player.mo === null) return;
   const mo = player.mo;
+  R_SetViewLighting(player.extralight, player.fixedcolormap);
   // Update view origin (used by sprite rotation pick in r_things.js).
   set_thing_view(mo.x, mo.y);
   // Doom -> Three.js: (mo.x, viewz, -mo.y). player.viewz is absolute world z.
