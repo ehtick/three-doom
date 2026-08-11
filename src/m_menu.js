@@ -20,7 +20,7 @@ export {
   snd_MusicVolume as musicVolume,
 } from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
-  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F11 } from './doomdef.js';
+  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F1, KEY_F11 } from './doomdef.js';
 import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
@@ -48,6 +48,7 @@ import {
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
+import { M_ReadThisPlan } from './m_menu_read_logic.js';
 import { HU_DrawLayout, HU_GetFont } from './hu_font.js';
 import { M_LayoutMessage } from './m_menu_text.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
@@ -97,13 +98,21 @@ const _saveStrings = new Array(SAVE_SLOTS).fill('EMPTY SLOT');
 
 // ---------- Menus ----------
 const CONTINUE_ITEM = { patch: 'M_CONT', label: 'Continue', action: () => M_ClearMenus() };
+const MAIN_MENU_ITEMS = {
+  continue: CONTINUE_ITEM,
+  newgame: { patch: 'M_NGAME',  label: 'New Game',  action: () => M_NewGame() },
+  options: { patch: 'M_OPTION', label: 'Options',   action: () => pushMenu(OPTIONS_MENU) },
+  readthis: { patch: 'M_RDTHIS', label: 'Read This!', action: () => pushMenu(READ_MENU_1) },
+  quit: { patch: 'M_QUITG',  label: 'Quit',      action: () => M_QuitDOOM() },
+};
+// The C menu has Load/Save between Options and Read This. Those browser rows
+// remain intentionally unavailable; mode layout uses the semantic table above
+// rather than pretending the omitted indices exist.
 const MAIN_MENU_BASE_ITEMS = [
-  { patch: 'M_NGAME',  label: 'New Game',  action: () => M_NewGame() },
-  { patch: 'M_OPTION', label: 'Options',   action: () => pushMenu(OPTIONS_MENU) },
-  // { patch: 'M_LOADG',  label: 'Load Game', action: () => pushMenu(LOAD_MENU) },
-  // { patch: 'M_SAVEG',  label: 'Save Game', action: () => pushMenu(SAVE_MENU) },
-  { patch: 'M_RDTHIS', label: 'Read This!', action: () => pushMenu(READ_MENU_1) },
-  { patch: 'M_QUITG',  label: 'Quit',      action: () => M_QuitDOOM() },
+  MAIN_MENU_ITEMS.newgame,
+  MAIN_MENU_ITEMS.options,
+  MAIN_MENU_ITEMS.readthis,
+  MAIN_MENU_ITEMS.quit,
 ];
 const MAIN_MENU = { name: 'Main', patch: 'M_DOOM', x: 97, y: 64, items: MAIN_MENU_BASE_ITEMS };
 
@@ -215,12 +224,46 @@ const SAVE_MENU = { name: 'Save Game', x: 80, y: 54, save: true, items:
   Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', get label() { return _saveStrings[i]; }, action: () => _saveSlot(i) })),
 };
 
-const READ_MENU_1 = { name: 'Read This', x: 280, y: 185, fullscreen: 'HELP1', items: [
-  { patch: '', label: '', action: () => pushMenu(READ_MENU_2) },
-]};
-const READ_MENU_2 = { name: 'Read This 2', x: 330, y: 175, fullscreen: 'HELP2', items: [
-  { patch: '', label: '', action: () => popMenu() },
-]};
+const READ_MENU_1 = { name: 'Read This',
+  get x() { return M_ReadThisPlan(gamemode).firstX; },
+  get y() { return M_ReadThisPlan(gamemode).firstY; },
+  get fullscreen() { return M_ReadThisPlan(gamemode).firstPatch; },
+  items: [{ patch: '', label: '', action: () => M_AdvanceReadThis() }],
+};
+const READ_MENU_2 = { name: 'Read This 2', x: 330, y: 175,
+  get fullscreen() { return M_ReadThisPlan(gamemode).secondPatch; },
+  items: [{ patch: '', label: '', action: () => M_FinishReadThis() }],
+};
+
+// m_menu.c:M_Init changes commercial ReadDef1 into a one-page HELP screen.
+// Other modes advance to ReadDef2; finishing always returns directly to MainDef.
+function M_AdvanceReadThis() {
+  if (M_ReadThisPlan(gamemode).firstAction === 'finish') M_FinishReadThis();
+  else pushMenu(READ_MENU_2);
+}
+
+function M_FinishReadThis() {
+  if (_currentMenu !== null) _currentMenu.lastOn = _selected;
+  _currentMenu = MAIN_MENU;
+  _menuStack = [];
+  _restoreCursor(MAIN_MENU);
+}
+
+// m_menu.c:1536-1546 — F1 opens ReadDef2 directly for retail and ReadDef1 for
+// every other mode. Preserve ReadDef2.prevMenu == ReadDef1 for retail Backspace.
+function M_OpenHelpShortcut() {
+  M_StartControlPanel();
+  const plan = M_ReadThisPlan(gamemode);
+  MAIN_MENU.lastOn = _selected;
+  if (plan.shortcutPage === 'second') {
+    _menuStack = [READ_MENU_1];
+    _currentMenu = READ_MENU_2;
+  } else {
+    _menuStack = [MAIN_MENU];
+    _currentMenu = READ_MENU_1;
+  }
+  _restoreCursor(_currentMenu);
+}
 
 // m_menu.c:M_SfxVol/M_MusicVol apply each slider step immediately through the
 // sound module. Keeping these setters exported also gives config/UI code one
@@ -367,6 +410,7 @@ function M_QuitDOOM() {
 export function M_Init() {
   _menuStack = [];
   _currentMenu = MAIN_MENU;
+  MAIN_MENU.y = M_ReadThisPlan(gamemode).mainY;
   _selected = 0;
   _skullFrame = 0;
   _skullTicker = 0;
@@ -378,9 +422,9 @@ export function M_StartControlPanel() {
   // level is active AND it isn't a title-screen demo playing in the
   // background.
   const inUserGame = gamestate === 0 /*GS_LEVEL*/ && demoplayback !== true;
-  MAIN_MENU.items = inUserGame
-    ? [CONTINUE_ITEM, ...MAIN_MENU_BASE_ITEMS]
-    : MAIN_MENU_BASE_ITEMS;
+  const plan = M_ReadThisPlan(gamemode, inUserGame);
+  MAIN_MENU.items = plan.mainItems.map((name) => MAIN_MENU_ITEMS[name]);
+  MAIN_MENU.y = plan.mainY;
   _currentMenu = MAIN_MENU;
   _menuStack = [];
   // DEVIATION from m_menu.c:1827 — vanilla restores MAIN_MENU.lastOn on open,
@@ -444,6 +488,10 @@ export function M_Responder(ev) {
     const player = players[consoleplayer];
     if (player !== null && player !== undefined) player.message = GAMMA_MESSAGES[gamma];
     I_SetPalette(W_CacheLumpName('PLAYPAL', 0));
+    return true;
+  }
+  if (key === KEY_F1 && menuactive !== true) {
+    M_OpenHelpShortcut();
     return true;
   }
   if (key === KEY_ESCAPE) {
