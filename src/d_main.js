@@ -592,7 +592,7 @@ async function D_DoomLoop() {
       } else if (gamestate === gamestate_t.GS_DEMOSCREEN) {
         D_PageTicker();
       }
-      // I_Quit can synchronously dispatch doom:quit from inside a ticker.
+      // I_Quit synchronously reaches graphics shutdown from inside a ticker.
       if (D_DoomRafLoop.active(loopToken) !== true) return;
       // d_net.c:735-746 — D_DoAdvanceDemo, M_Ticker, and G_Ticker (which
       // contains the state-specific tickers in vanilla) all observe the

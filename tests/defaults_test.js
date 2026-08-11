@@ -1,5 +1,5 @@
 import * as doomstat from '../src/doomstat.js';
-import { I_Quit } from '../src/i_system.js';
+import { I_Quit, I_RegisterQuitGraphics } from '../src/i_system.js';
 import { HU_SetShowMessages, showMessages } from '../src/hu_stuff.js';
 import { M_RegisterDoomDefaults } from '../src/m_defaults.js';
 import { M_LoadDefaults, M_SaveDefaults } from '../src/m_misc.js';
@@ -71,9 +71,8 @@ Deno.test('input, sound, messages, and video round-trip through registered defau
   }
 });
 
-Deno.test('I_Quit saves defaults before dispatching graphics shutdown', () => {
+Deno.test('I_Quit saves defaults before late-registered graphics shutdown', async () => {
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  const oldWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   const values = new Map();
   const calls = [];
   Object.defineProperty(globalThis, 'localStorage', {
@@ -86,10 +85,6 @@ Deno.test('I_Quit saves defaults before dispatching graphics shutdown', () => {
       },
     },
   });
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { dispatchEvent: () => { calls.push('quit'); } },
-  });
   try {
     M_RegisterDoomDefaults();
     doomstat.set_mouseSensitivity(7);
@@ -98,8 +93,14 @@ Deno.test('I_Quit saves defaults before dispatching graphics shutdown', () => {
     HU_SetShowMessages(0);
     set_usegamma(4);
     R_SetViewSize(8);
-    I_Quit();
-    assertEquals(calls.join(','), 'save,quit', 'quit lifecycle order');
+    const firstQuit = I_Quit();
+    const secondQuit = I_Quit();
+    assertEquals(firstQuit === secondQuit, true, 'quit promise identity');
+    assertEquals(calls.join(','), 'save', 'defaults before graphics registration');
+    I_RegisterQuitGraphics(() => { calls.push('graphics'); });
+    assertEquals(calls.join(','), 'save,graphics', 'late graphics registration is synchronous');
+    await firstQuit;
+    assertEquals(calls.join(','), 'save,graphics', 'observable quit lifecycle order');
     assertEquals(
       values.get('doom:defaults'),
       'mouse_sensitivity\t\t7\nsfx_volume\t\t11\nmusic_volume\t\t4\nshow_messages\t\t0\nusegamma\t\t4\nscreenblocks\t\t8',
@@ -114,8 +115,6 @@ Deno.test('I_Quit saves defaults before dispatching graphics shutdown', () => {
     R_SetViewSize(9);
     if (oldStorage === undefined) delete globalThis.localStorage;
     else Object.defineProperty(globalThis, 'localStorage', oldStorage);
-    if (oldWindow === undefined) delete globalThis.window;
-    else Object.defineProperty(globalThis, 'window', oldWindow);
   }
 });
 

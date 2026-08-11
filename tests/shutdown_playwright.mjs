@@ -26,6 +26,11 @@ async function trackAudioContexts(page, failClose = false) {
       live: 0,
       closeCalls: 0,
       closeSettled: 0,
+      graphicsCalls: 0,
+      musicPlayingAtSound: null,
+      musicPlayingAtDefaults: null,
+      musicPlayingAtGraphics: null,
+      defaultsPresentAtGraphics: false,
       order: [],
     };
     if (NativeAudioContext === undefined) return;
@@ -48,6 +53,7 @@ async function trackAudioContexts(page, failClose = false) {
     NativeAudioContext.prototype.close = function() {
       state.closeCalls++;
       state.order.push('sound');
+      state.musicPlayingAtSound = window.__doomMusicPlaying?.() ?? null;
       if (rejectClose === true) {
         return Promise.reject(new Error('intentional AudioContext.close failure'));
       }
@@ -56,6 +62,15 @@ async function trackAudioContexts(page, failClose = false) {
         state.live--;
         return result;
       });
+    };
+
+    const nativeSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key === 'doom:defaults') {
+        state.order.push('defaults');
+        state.musicPlayingAtDefaults = window.__doomMusicPlaying?.() ?? null;
+      }
+      return nativeSetItem.call(this, key, value);
     };
   }, { rejectClose: failClose });
 }
@@ -83,14 +98,22 @@ try {
     const wi = await import('/src/wi_stuff.js');
     const system = await import('/src/i_system.js');
     const sound = await import('/src/i_sound.js');
+    const shutdown = await import('/src/i_shutdown.js');
     const oldRenderer = window.renderer;
     const oldScene = window.scene;
     const oldCamera = window.camera;
     const oldCanvas = oldRenderer.domElement;
-    const nativeForceContextLoss = oldRenderer.forceContextLoss.bind(oldRenderer);
-    oldRenderer.forceContextLoss = () => {
-      window.__doomAudioShutdown.order.push('graphics');
-      return nativeForceContextLoss();
+    window.__doomMusicPlaying = () => sound.I_QrySongPlaying(0);
+    const nativeLoopClose = loop.D_DoomRafLoop.close.bind(loop.D_DoomRafLoop);
+    loop.D_DoomRafLoop.close = () => {
+      const audio = window.__doomAudioShutdown;
+      audio.graphicsCalls++;
+      if (audio.graphicsCalls === 1) {
+        audio.order.push('graphics');
+        audio.musicPlayingAtGraphics = sound.I_QrySongPlaying(0);
+        audio.defaultsPresentAtGraphics = localStorage.getItem('doom:defaults') !== null;
+      }
+      return nativeLoopClose();
     };
     const musicWasPlaying = sound.I_QrySongPlaying(0);
     const makeWb = () => ({
@@ -156,12 +179,27 @@ try {
     // their continuations are invalidated and cannot reopen UI/pointer lock.
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
     document.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
-    system.I_Quit();
-    system.I_Quit();
+    const cleanupProbeCalls = [];
+    const cleanupProbeErrors = [];
+    await shutdown.I_RunCleanupSteps([
+      async () => { cleanupProbeCalls.push('failed import'); throw new Error('intentional import failure'); },
+      async () => { cleanupProbeCalls.push('remaining cleanup'); },
+    ], cleanupProbeErrors);
+
+    const firstQuit = system.I_Quit();
+    const immediateQuit = {
+      order: [...window.__doomAudioShutdown.order],
+      musicStopped: sound.I_QrySongPlaying(0) === false,
+      defaultsPresent: localStorage.getItem('doom:defaults') !== null,
+      graphicsCalls: window.__doomAudioShutdown.graphicsCalls,
+    };
+    const secondQuit = system.I_Quit();
+    const sameQuitPromise = firstQuit === secondQuit;
     const first = iv.I_ShutdownGraphics();
     const second = iv.I_ShutdownGraphics();
     const samePromise = first === second;
-    const report = await first;
+    const report = await firstQuit;
+    await first;
     await second;
     const firstSoundShutdown = sound.I_ShutdownSound();
     const secondSoundShutdown = sound.I_ShutdownSound();
@@ -177,10 +215,16 @@ try {
 
     return {
       samePromise,
+      sameQuitPromise,
+      immediateQuit,
       sameSoundPromise: firstSoundShutdown === secondSoundShutdown,
       musicWasPlaying,
       musicIsPlaying: sound.I_QrySongPlaying(0),
       audioShutdown: { ...window.__doomAudioShutdown },
+      cleanupProbe: {
+        calls: cleanupProbeCalls,
+        errors: cleanupProbeErrors.map((error) => error.message),
+      },
       report,
       disposed,
       expected: {
@@ -221,7 +265,29 @@ try {
   await trackAudioContexts(earlyPage);
   await earlyPage.goto(url.href, { waitUntil: 'domcontentloaded' });
   await earlyPage.waitForFunction(() => window.renderer !== undefined, { timeout: 30000 });
-  await earlyPage.evaluate(() => window.dispatchEvent(new CustomEvent('doom:quit')));
+  await earlyPage.evaluate(async () => {
+    const sound = await import('/src/i_sound.js');
+    const loop = await import('/src/d_loop.js');
+    window.__doomMusicPlaying = () => sound.I_QrySongPlaying(0);
+    const nativeLoopClose = loop.D_DoomRafLoop.close.bind(loop.D_DoomRafLoop);
+    loop.D_DoomRafLoop.close = () => {
+      const audio = window.__doomAudioShutdown;
+      audio.graphicsCalls++;
+      if (audio.graphicsCalls === 1) {
+        audio.order.push('graphics');
+        audio.musicPlayingAtGraphics = sound.I_QrySongPlaying(0);
+        audio.defaultsPresentAtGraphics = localStorage.getItem('doom:defaults') !== null;
+      }
+      return nativeLoopClose();
+    };
+    window.dispatchEvent(new CustomEvent('doom:quit'));
+    window.__doomEarlyImmediateQuit = {
+      order: [...window.__doomAudioShutdown.order],
+      musicStopped: sound.I_QrySongPlaying(0) === false,
+      defaultsPresent: localStorage.getItem('doom:defaults') !== null,
+      graphicsCalls: window.__doomAudioShutdown.graphicsCalls,
+    };
+  });
   await earlyPage.waitForTimeout(1500);
   const early = await earlyPage.evaluate(async () => {
     const iv = await import('/src/i_video.js');
@@ -233,6 +299,7 @@ try {
         document.querySelector('#container canvas') === null,
       loopClosed: loop.D_DoomRafLoop.isClosed() === true && loop.D_DoomRafLoop.isRunning() === false,
       gametic: doomstat.gametic,
+      immediateQuit: window.__doomEarlyImmediateQuit,
       audioShutdown: { ...window.__doomAudioShutdown },
     };
   });
@@ -247,27 +314,47 @@ try {
   await trackAudioContexts(failurePage, true);
   await failurePage.goto(url.href, { waitUntil: 'domcontentloaded' });
   await failurePage.waitForFunction(() => window.renderer !== undefined, { timeout: 30000 });
+  // Unlike the early-startup case, this page must own a real context so the
+  // intentional close rejection exercises async audio failure containment.
+  await failurePage.waitForFunction(() => window.__doomAudioShutdown.created === 1, { timeout: 30000 });
   const failureCleanup = await failurePage.evaluate(async () => {
     const iv = await import('/src/i_video.js');
     const loop = await import('/src/d_loop.js');
     const system = await import('/src/i_system.js');
     const sound = await import('/src/i_sound.js');
     const oldRenderer = window.renderer;
-    const nativeForceContextLoss = oldRenderer.forceContextLoss.bind(oldRenderer);
-    oldRenderer.forceContextLoss = () => {
-      window.__doomAudioShutdown.order.push('graphics');
-      return nativeForceContextLoss();
+    window.__doomMusicPlaying = () => sound.I_QrySongPlaying(0);
+    const nativeLoopClose = loop.D_DoomRafLoop.close.bind(loop.D_DoomRafLoop);
+    loop.D_DoomRafLoop.close = () => {
+      const audio = window.__doomAudioShutdown;
+      audio.graphicsCalls++;
+      if (audio.graphicsCalls === 1) {
+        audio.order.push('graphics');
+        audio.musicPlayingAtGraphics = sound.I_QrySongPlaying(0);
+        audio.defaultsPresentAtGraphics = localStorage.getItem('doom:defaults') !== null;
+      }
+      return nativeLoopClose();
     };
     iv.I_RegisterGraphicsShutdownHook(() => { throw new Error('intentional shutdown-hook failure'); });
-    system.I_Quit();
-    const first = iv.I_ShutdownGraphics();
-    const second = iv.I_ShutdownGraphics();
+    const first = system.I_Quit();
+    const immediateQuit = {
+      order: [...window.__doomAudioShutdown.order],
+      musicStopped: sound.I_QrySongPlaying(0) === false,
+      defaultsPresent: localStorage.getItem('doom:defaults') !== null,
+      graphicsCalls: window.__doomAudioShutdown.graphicsCalls,
+    };
+    const second = system.I_Quit();
+    const firstGraphics = iv.I_ShutdownGraphics();
+    const secondGraphics = iv.I_ShutdownGraphics();
     let rejected = false;
     try { await first; } catch (error) { rejected = error instanceof AggregateError; }
     try { await second; } catch (_) {}
+    try { await firstGraphics; } catch (_) {}
     return {
       rejected,
       samePromise: first === second,
+      sameGraphicsPromise: firstGraphics === secondGraphics,
+      immediateQuit,
       clean: iv.renderer === null && iv.scene === null && iv.camera === null &&
         window.renderer === undefined && window.scene === undefined && window.camera === undefined &&
         document.querySelector('#container canvas') === null,
@@ -281,15 +368,30 @@ try {
 
   const failures = [];
   if (!result.samePromise) failures.push('repeated shutdown did not return the same promise');
+  if (!result.sameQuitPromise) failures.push('repeated I_Quit did not return the same promise');
   if (!result.sameSoundPromise) failures.push('repeated sound shutdown did not return the same promise');
   if (!result.musicWasPlaying || result.musicIsPlaying) failures.push('music was not stopped by I_Quit');
   if (result.audioShutdown.created !== 1 || result.audioShutdown.closeCalls !== 1 ||
       result.audioShutdown.closeSettled !== 1 || result.audioShutdown.live !== 0) {
     failures.push(`AudioContext was not closed exactly once: ${JSON.stringify(result.audioShutdown)}`);
   }
-  if (result.audioShutdown.order.indexOf('sound') < 0 ||
-      result.audioShutdown.order.indexOf('graphics') <= result.audioShutdown.order.indexOf('sound')) {
-    failures.push(`sound did not shut down before graphics: ${JSON.stringify(result.audioShutdown.order)}`);
+  if (JSON.stringify(result.audioShutdown.order.slice(0, 3)) !==
+      JSON.stringify(['sound', 'defaults', 'graphics']) ||
+      result.audioShutdown.musicPlayingAtSound !== true ||
+      result.audioShutdown.musicPlayingAtDefaults !== false ||
+      result.audioShutdown.musicPlayingAtGraphics !== false ||
+      result.audioShutdown.defaultsPresentAtGraphics !== true) {
+    failures.push(`quit subsystem order differed from i_system.c: ${JSON.stringify(result.audioShutdown)}`);
+  }
+  if (JSON.stringify(result.immediateQuit.order.slice(0, 3)) !==
+      JSON.stringify(['sound', 'defaults', 'graphics']) ||
+      !result.immediateQuit.musicStopped || !result.immediateQuit.defaultsPresent ||
+      result.immediateQuit.graphicsCalls !== 1) {
+    failures.push(`quit prelude was not synchronous: ${JSON.stringify(result.immediateQuit)}`);
+  }
+  if (JSON.stringify(result.cleanupProbe.calls) !== JSON.stringify(['failed import', 'remaining cleanup']) ||
+      JSON.stringify(result.cleanupProbe.errors) !== JSON.stringify(['intentional import failure'])) {
+    failures.push(`failed cleanup import suppressed later work: ${JSON.stringify(result.cleanupProbe)}`);
   }
   if (!result.globalsCleared) failures.push('graphics globals were retained');
   if (!result.domCleared) failures.push('renderer DOM/scene objects were retained');
@@ -311,14 +413,36 @@ try {
   if (early.audioShutdown.live !== 0 || early.audioShutdown.created !== early.audioShutdown.closeCalls) {
     failures.push(`startup shutdown leaked/recreated audio: ${JSON.stringify(early.audioShutdown)}`);
   }
-  if (!failureCleanup.rejected || !failureCleanup.samePromise || !failureCleanup.clean ||
+  const expectedEarlyOrder = early.audioShutdown.created === 0
+    ? ['defaults', 'graphics']
+    : ['sound', 'defaults', 'graphics'];
+  if (JSON.stringify(early.audioShutdown.order.slice(0, expectedEarlyOrder.length)) !==
+      JSON.stringify(expectedEarlyOrder) ||
+      early.audioShutdown.musicPlayingAtDefaults !== false ||
+      early.audioShutdown.defaultsPresentAtGraphics !== true) {
+    failures.push(`startup quit order differed: ${JSON.stringify(early.audioShutdown)}`);
+  }
+  if (JSON.stringify(early.immediateQuit.order.slice(0, expectedEarlyOrder.length)) !==
+      JSON.stringify(expectedEarlyOrder) || !early.immediateQuit.musicStopped ||
+      !early.immediateQuit.defaultsPresent || early.immediateQuit.graphicsCalls !== 1) {
+    failures.push(`startup quit prelude was not synchronous: ${JSON.stringify(early.immediateQuit)}`);
+  }
+  if (!failureCleanup.rejected || !failureCleanup.samePromise || !failureCleanup.sameGraphicsPromise || !failureCleanup.clean ||
       !failureCleanup.contextLost || !failureCleanup.loopClosed || !failureCleanup.musicStopped) {
     failures.push('failed shutdown hook stranded graphics cleanup');
   }
   if (failureCleanup.audioShutdown.closeCalls !== 1 ||
-      failureCleanup.audioShutdown.order.indexOf('graphics') <=
-        failureCleanup.audioShutdown.order.indexOf('sound')) {
+      JSON.stringify(failureCleanup.audioShutdown.order.slice(0, 3)) !==
+        JSON.stringify(['sound', 'defaults', 'graphics']) ||
+      failureCleanup.audioShutdown.musicPlayingAtDefaults !== false ||
+      failureCleanup.audioShutdown.defaultsPresentAtGraphics !== true) {
     failures.push(`failed audio close stranded/preceded graphics cleanup: ${JSON.stringify(failureCleanup.audioShutdown)}`);
+  }
+  if (JSON.stringify(failureCleanup.immediateQuit.order.slice(0, 3)) !==
+      JSON.stringify(['sound', 'defaults', 'graphics']) ||
+      !failureCleanup.immediateQuit.musicStopped || !failureCleanup.immediateQuit.defaultsPresent ||
+      failureCleanup.immediateQuit.graphicsCalls !== 1) {
+    failures.push(`failed quit prelude was not synchronous: ${JSON.stringify(failureCleanup.immediateQuit)}`);
   }
   if (result.disposed.geometries !== result.expected.geometries) failures.push(`level geometries disposed ${result.disposed.geometries}/${result.expected.geometries}`);
   if (result.disposed.materials !== result.expected.materials) failures.push(`level materials disposed ${result.disposed.materials}/${result.expected.materials}`);

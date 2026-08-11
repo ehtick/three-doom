@@ -3,6 +3,8 @@
 
 import { TICRATE } from './doomdef.js';
 import { M_SaveDefaults } from './m_misc.js';
+import { I_ShutdownMusic, I_ShutdownSound } from './i_sound.js';
+import { I_RunQuitSequence } from './i_shutdown.js';
 
 // Doom uses a 35Hz tic clock derived from real-time. In the browser we anchor
 // at I_Init() and report ticks based on performance.now().
@@ -37,13 +39,68 @@ export function I_BaseTiccmd() {
   return _baseTiccmd;
 }
 
-export function I_Quit() {
-  // i_system.c:I_Quit saves the active defaults before graphics shutdown.
-  // The browser has no process exit, so doom:quit performs the teardown.
-  M_SaveDefaults();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('doom:quit'));
+// i_video registers its graphics owner at module evaluation time. Keeping the
+// callback here avoids an i_system -> i_video import cycle while still letting
+// I_Quit own the reference subsystem order.
+let _shutdownGraphics = null;
+let _pendingGraphicsQuit = null;
+export function I_RegisterQuitGraphics(shutdown) {
+  _shutdownGraphics = shutdown;
+  if (_pendingGraphicsQuit === null) return;
+
+  // I_Quit can precede i_video module evaluation during early startup. Claim
+  // graphics synchronously as registration completes so later startup work
+  // sees the renderer as terminal, while preserving its result in I_Quit.
+  const pending = _pendingGraphicsQuit;
+  _pendingGraphicsQuit = null;
+  try {
+    Promise.resolve(shutdown()).then(pending.resolve, pending.reject);
+  } catch (error) {
+    pending.reject(error);
   }
+}
+
+function I_ShutdownRegisteredGraphics() {
+  if (_shutdownGraphics !== null) return _shutdownGraphics();
+  return new Promise((resolve, reject) => {
+    _pendingGraphicsQuit = { resolve, reject };
+  });
+}
+
+// The browser port has no live network transport. This is the single-player
+// no-op equivalent of d_net.c:D_QuitNetGame, retained as an explicit stage so
+// a future transport cannot accidentally be shut down out of order.
+function D_QuitNetGame() {}
+
+let _quitPromise = null;
+export function I_Quit() {
+  if (_quitPromise !== null) return _quitPromise;
+
+  // Publish the cached promise before any stage runs so even a re-entrant quit
+  // from a callback observes the same terminal operation.
+  let resolveQuit;
+  let rejectQuit;
+  _quitPromise = new Promise((resolve, reject) => {
+    resolveQuit = resolve;
+    rejectQuit = reject;
+  });
+
+  const sequence = I_RunQuitSequence({
+    // i_system.c:118-122 — exact source call order.
+    D_QuitNetGame,
+    I_ShutdownSound,
+    I_ShutdownMusic,
+    M_SaveDefaults,
+    I_ShutdownGraphics: I_ShutdownRegisteredGraphics,
+  });
+  sequence.then(resolveQuit, rejectQuit);
+
+  // Menu callers cannot await process-style quit. Observe the cached promise
+  // here so an aggregated browser cleanup failure is reported, not unhandled.
+  void _quitPromise.catch((error) => {
+    console.error('I_Quit teardown failed:', error);
+  });
+  return _quitPromise;
 }
 
 // Allocate low memory. In the browser this is just a typed array.

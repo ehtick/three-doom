@@ -21,6 +21,8 @@ import { R_SetPaletteIndex, R_SetPlaypal, R_ShutdownShader } from './r_shader.js
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_ShouldInterceptDemoInput } from './d_input_logic.js';
 import { R_CalculateCanvasView, R_DoomVerticalFov, R_GetViewSize } from './r_view.js';
+import { I_Quit, I_RegisterQuitGraphics } from './i_system.js';
+import { I_RunCleanupSteps } from './i_shutdown.js';
 
 // ---------- Three.js setup ----------
 export let renderer = null;
@@ -114,12 +116,14 @@ function onRendererClick(e) {
 }
 
 function onDoomQuit() {
-  // Browser teardown is asynchronous; report failure without allowing an
-  // event-listener promise rejection to escape as an unhandled rejection.
-  void I_ShutdownGraphics().catch((error) => {
-    console.error('I_Quit teardown failed:', error);
-  });
+  // Keep the event as a public browser entry point, but route it through the
+  // same cached source-ordered I_Quit operation as the menu.
+  void I_Quit();
 }
+
+// Registered at module evaluation, before async D_DoomMain startup can yield.
+// This also makes an early programmatic I_Quit terminal for the renderer.
+I_RegisterQuitGraphics(I_ShutdownGraphics);
 
 export function I_InitGraphics() {
   if (renderer !== null || _shutdownPromise !== null) {
@@ -270,45 +274,25 @@ export function I_ShutdownGraphics() {
     let disposedLevelObjects = 0;
     let contextLost = ownedRenderer === null;
     try {
-      const [iSound, dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, rBorder, fWipe, vVideo, hu, wi, finale] = await Promise.all([
-        import('./i_sound.js'),
-        import('./d_main.js'),
-        import('./d_keyboard.js'),
-        import('./d_freecamera.js'),
-        import('./r_main.js'),
-        import('./r_data.js'),
-        import('./r_things.js'),
-        import('./r_psprite.js'),
-        import('./r_border.js'),
-        import('./f_wipe.js'),
-        import('./v_video.js'),
-        import('./hu_stuff.js'),
-        import('./wi_stuff.js'),
-        import('./f_finale.js'),
-      ]);
-      const cleanupSteps = [
-        // i_system.c:I_Quit shuts down SFX, then music, before graphics.
-        () => iSound.I_ShutdownSound(),
-        () => iSound.I_ShutdownMusic(),
-        () => dMain.D_ShutdownDoomLoop(),
-        () => keyboard.D_KeyboardInput.shutdown(),
-        () => freeCamera.D_FreeCamera.shutdown(),
-        () => { disposedLevelObjects = rMain.R_Shutdown(); },
-        () => rThings.R_ShutdownThings(),
-        () => rPsprite.R_ShutdownPlayerSprites(),
-        () => rBorder.R_ShutdownViewBorder(),
-        () => fWipe.wipe_Shutdown(),
-        () => hu.HU_Shutdown(),
-        () => wi.WI_Shutdown(),
-        () => finale.F_Shutdown(),
-        () => vVideo.V_ShutdownCanvases(),
-        () => rData.R_ShutdownData(),
+      await I_RunCleanupSteps([
+        async () => (await import('./d_main.js')).D_ShutdownDoomLoop(),
+        async () => (await import('./d_keyboard.js')).D_KeyboardInput.shutdown(),
+        async () => (await import('./d_freecamera.js')).D_FreeCamera.shutdown(),
+        async () => { disposedLevelObjects = (await import('./r_main.js')).R_Shutdown(); },
+        async () => (await import('./r_things.js')).R_ShutdownThings(),
+        async () => (await import('./r_psprite.js')).R_ShutdownPlayerSprites(),
+        async () => (await import('./r_border.js')).R_ShutdownViewBorder(),
+        async () => (await import('./f_wipe.js')).wipe_Shutdown(),
+        async () => (await import('./hu_stuff.js')).HU_Shutdown(),
+        async () => (await import('./wi_stuff.js')).WI_Shutdown(),
+        async () => (await import('./f_finale.js')).F_Shutdown(),
+        async () => (await import('./v_video.js')).V_ShutdownCanvases(),
+        async () => (await import('./r_data.js')).R_ShutdownData(),
         () => R_ShutdownShader(),
-      ];
-      for (const cleanup of cleanupSteps) {
-        try { await cleanup(); } catch (error) { cleanupErrors.push(error); }
-      }
+      ], cleanupErrors);
     } catch (error) {
+      // I_RunCleanupSteps contains individual failures; retain this guard for
+      // an unexpected iterator/helper failure without skipping finalization.
       cleanupErrors.push(error);
     } finally {
       try { if (ownedScene !== null) ownedScene.clear(); } catch (error) { cleanupErrors.push(error); }
