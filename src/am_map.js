@@ -4,16 +4,17 @@
 // via 'f', Tab to open/close, mark placement via 'm', and mark clear via 'c'.
 
 import {
-  bmaporgx, bmaporgy, lines, numlines, vertexes,
+  bmaporgx, bmaporgy, lines, numlines, vertexes, sectors, numsectors,
 } from './p_setup.js';
 import {
   players, playeringame, consoleplayer, automapactive, set_automapactive,
-  gameepisode, gamemap,
+  gameepisode, gamemap, deathmatch, netgame,
 } from './doomstat.js';
 import { ML_DONTDRAW, ML_SECRET, ML_MAPPED } from './doomdata.js';
 import { KEY_TAB } from './doomdef.js';
 import { evtype_t } from './d_event.js';
-import { FRACUNIT } from './m_fixed.js';
+import { FixedMul, FRACUNIT } from './m_fixed.js';
+import { finecosine, finesine } from './tables.js';
 import { V_PaletteCSS } from './v_palette.js';
 import {
   AMSTR_FOLLOWON, AMSTR_FOLLOWOFF, AMSTR_GRIDON, AMSTR_GRIDOFF,
@@ -34,6 +35,26 @@ let _lastLevel = -1;
 let _lastEpisode = -1;
 let _stopped = true;
 
+// am_map.c:216,701-705 — IDDT is deliberately an automap-local cheat rather
+// than one of ST_Responder's gameplay cheats. It is available in single-player
+// and cooperative netgames, but not deathmatch, and persists across map opens.
+const _cheatAmap = 'iddt';
+let _cheatAmapPos = 0;
+let _cheating = 0;
+
+export function AM_GetCheatLevel() { return _cheating; }
+
+// m_cheat.c:cht_CheckCheat without parameter slots. The real table scrambles
+// stored bytes, but equality and mismatch/reset behavior reduce to this for a
+// fixed ASCII sequence such as IDDT.
+function checkAutomapCheat(key) {
+  if ((key & 0xff) === _cheatAmap.charCodeAt(_cheatAmapPos)) _cheatAmapPos++;
+  else _cheatAmapPos = 0;
+  if (_cheatAmapPos !== _cheatAmap.length) return false;
+  _cheatAmapPos = 0;
+  return true;
+}
+
 // am_map.c color classes (AM_drawWalls): one-sided walls are red, teleporter
 // lines mid-red, floor-height changes brown, ceiling-height changes yellow.
 const COLOR_BACKGROUND = 0;              // BLACK
@@ -41,9 +62,88 @@ const COLOR_WALL       = 256 - 5 * 16;   // WALLCOLORS (REDS)
 const COLOR_TELEPORT   = COLOR_WALL + 8; // WALLCOLORS + WALLRANGE/2
 const COLOR_FLOORDIFF  = 4 * 16;         // FDWALLCOLORS (BROWNS)
 const COLOR_CEILDIFF   = 256 - 32 + 7;   // CDWALLCOLORS (YELLOWS)
+const COLOR_TWOSIDED   = 6 * 16;         // TSWALLCOLORS (GRAYS)
+const COLOR_ALLMAP     = 6 * 16 + 3;     // GRAYS + 3
+export const AM_THING_COLOR = 7 * 16;    // THINGCOLORS (GREENS)
 const COLOR_PLAYER     = 256 - 47;        // YOURCOLORS (WHITE)
 const COLOR_GRID       = 6 * 16 + 8;     // GRIDCOLORS (GRAYS + 8)
 const COLOR_MARK       = 103;            // opaque AMMNUM patch pixel index
+
+function mapLine(ax, ay, bx, by) {
+  return { a: { x: ax, y: ay }, b: { x: bx, y: by } };
+}
+
+// am_map.c's initializers are converted to signed 16.16 fixed_t values before
+// AM_drawLineCharacter applies its optional scale and BAM-angle rotation.
+const THIN_TRIANGLE = [
+  mapLine(-32768, -45875, 65536, 0),
+  mapLine(65536, 0, -32768, 45875),
+  mapLine(-32768, 45875, -32768, -45875),
+];
+
+const PLAYER_RADIUS = 16 * FRACUNIT;
+const ARROW_R = Math.trunc((8 * PLAYER_RADIUS) / 7);
+const div = (value, divisor) => Math.trunc(value / divisor);
+
+// am_map.c:157-195 — the 16 strokes spell "ddt" inside the longer player
+// arrow whenever the single-player automap cheat is active.
+const CHEAT_PLAYER_ARROW = [
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, ARROW_R, 0),
+  mapLine(ARROW_R, 0, ARROW_R - div(ARROW_R, 2), div(ARROW_R, 6)),
+  mapLine(ARROW_R, 0, ARROW_R - div(ARROW_R, 2), -div(ARROW_R, 6)),
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, -ARROW_R - div(ARROW_R, 8), div(ARROW_R, 6)),
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, -ARROW_R - div(ARROW_R, 8), -div(ARROW_R, 6)),
+  mapLine(-ARROW_R + div(3 * ARROW_R, 8), 0, -ARROW_R + div(ARROW_R, 8), div(ARROW_R, 6)),
+  mapLine(-ARROW_R + div(3 * ARROW_R, 8), 0, -ARROW_R + div(ARROW_R, 8), -div(ARROW_R, 6)),
+  mapLine(-div(ARROW_R, 2), 0, -div(ARROW_R, 2), -div(ARROW_R, 6)),
+  mapLine(-div(ARROW_R, 2), -div(ARROW_R, 6), -div(ARROW_R, 2) + div(ARROW_R, 6), -div(ARROW_R, 6)),
+  mapLine(-div(ARROW_R, 2) + div(ARROW_R, 6), -div(ARROW_R, 6), -div(ARROW_R, 2) + div(ARROW_R, 6), div(ARROW_R, 4)),
+  mapLine(-div(ARROW_R, 6), 0, -div(ARROW_R, 6), -div(ARROW_R, 6)),
+  mapLine(-div(ARROW_R, 6), -div(ARROW_R, 6), 0, -div(ARROW_R, 6)),
+  mapLine(0, -div(ARROW_R, 6), 0, div(ARROW_R, 4)),
+  mapLine(div(ARROW_R, 6), div(ARROW_R, 4), div(ARROW_R, 6), -div(ARROW_R, 7)),
+  mapLine(div(ARROW_R, 6), -div(ARROW_R, 7), div(ARROW_R, 6) + div(ARROW_R, 32), -div(ARROW_R, 7) - div(ARROW_R, 32)),
+  mapLine(div(ARROW_R, 6) + div(ARROW_R, 32), -div(ARROW_R, 7) - div(ARROW_R, 32), div(ARROW_R, 6) + div(ARROW_R, 10), -div(ARROW_R, 7)),
+];
+
+function transformPoint(point, scale, angle, originX, originY) {
+  let x = point.x | 0;
+  let y = point.y | 0;
+  if (scale !== 0) {
+    x = FixedMul(scale, x);
+    y = FixedMul(scale, y);
+  }
+  if ((angle >>> 0) !== 0) {
+    const fineangle = angle >>> 19;
+    const oldX = x;
+    x = (FixedMul(x, finecosine[fineangle]) -
+      FixedMul(y, finesine[fineangle])) | 0;
+    y = (FixedMul(oldX, finesine[fineangle]) +
+      FixedMul(y, finecosine[fineangle])) | 0;
+  }
+  return { x: (x + originX) | 0, y: (y + originY) | 0 };
+}
+
+function lineCharacterSegments(character, scale, angle, originX, originY) {
+  return character.map((line) => ({
+    a: transformPoint(line.a, scale, angle, originX, originY),
+    b: transformPoint(line.b, scale, angle, originX, originY),
+  }));
+}
+
+export function AM_ThingSegments(thing) {
+  return lineCharacterSegments(
+    THIN_TRIANGLE,
+    16 * FRACUNIT,
+    thing.angle,
+    thing.x,
+    thing.y,
+  );
+}
+
+export function AM_CheatPlayerSegments(mo) {
+  return lineCharacterSegments(CHEAT_PLAYER_ARROW, 0, mo.angle, mo.x, mo.y);
+}
 
 // am_map.c:AM_NUMMARKPOINTS — player-placed map markers. x === -1 means empty.
 const AM_NUMMARKPOINTS = 10;
@@ -129,7 +229,33 @@ export function AM_Responder(ev) {
     };
     player.message = messages[result.message];
   }
+
+  // The reference checks this after its control-key switch. A completed IDDT
+  // is intentionally returned as unhandled so the final 't' can continue
+  // through the responder chain just like every other cheat character.
+  if (ev.type === evtype_t.ev_keydown && deathmatch === 0 && checkAutomapCheat(ev.data1)) {
+    _cheating = (_cheating + 1) % 3;
+    return false;
+  }
   return result.handled;
+}
+
+// am_map.c:AM_drawWalls. Kept pure so fog-of-war and IDDT visibility cases can
+// be checked independently of Canvas2D rendering.
+export function AM_LineColorForMode(li, cheatLevel, hasAllMap = false) {
+  const cheating = (cheatLevel | 0) !== 0;
+  if (cheating || (li.flags & ML_MAPPED) !== 0) {
+    if ((li.flags & ML_DONTDRAW) !== 0 && !cheating) return null;
+    if (li.backsector === null) return COLOR_WALL;
+    if (li.special === 39) return COLOR_TELEPORT;
+    if ((li.flags & ML_SECRET) !== 0) return COLOR_WALL;
+    if (li.backsector.floorheight !== li.frontsector.floorheight) return COLOR_FLOORDIFF;
+    if (li.backsector.ceilingheight !== li.frontsector.ceilingheight) return COLOR_CEILDIFF;
+    if (cheating) return COLOR_TWOSIDED;
+    return null;
+  }
+  if (hasAllMap && (li.flags & ML_DONTDRAW) === 0) return COLOR_ALLMAP;
+  return null;
 }
 
 export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
@@ -183,27 +309,12 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   // Lines, bucketed by color (am_map.c:AM_drawWalls).
   overlayCtx.lineWidth = 1.5;
   const buckets = new Map();
+  const p = mapPlayer();
+  const hasAllMap = (p?.powers?.[4] ?? 0) !== 0;
   for (let i = 0; i < numlines; i++) {
     const li = lines[i];
-    // LINE_NEVERSEE — never draw.
-    if ((li.flags & ML_DONTDRAW) !== 0) continue;
-    // Fog of war: only show linedefs the player has been near (ML_MAPPED set
-    // by r_main.R_SetupFrame for the player's current subsector).
-    if ((li.flags & ML_MAPPED) === 0) continue;
-    let color;
-    if (li.backsector === null) {
-      color = COLOR_WALL;                        // one-sided wall
-    } else if (li.special === 39) {
-      color = COLOR_TELEPORT;                    // teleporter line
-    } else if ((li.flags & ML_SECRET) !== 0) {
-      color = COLOR_WALL;                        // secret door — looks solid
-    } else if (li.backsector.floorheight !== li.frontsector.floorheight) {
-      color = COLOR_FLOORDIFF;                   // floor-level change
-    } else if (li.backsector.ceilingheight !== li.frontsector.ceilingheight) {
-      color = COLOR_CEILDIFF;                    // ceiling-level change
-    } else {
-      continue;                                  // two-sided, no height change
-    }
+    const color = AM_LineColorForMode(li, _cheating, hasAllMap);
+    if (color === null) continue;
     let b = buckets.get(color);
     if (b === undefined) { b = []; buckets.set(color, b); }
     b.push(li);
@@ -221,18 +332,48 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
 
   // Player triangle.
-  const p = mapPlayer();
   if (p !== undefined && p !== null && p.mo !== null) {
-    const [px, py] = project(p.mo.x, p.mo.y);
-    const angle = (p.mo.angle >>> 0) / 0x100000000 * Math.PI * 2;
-    const r = 12;
     overlayCtx.strokeStyle = V_PaletteCSS(COLOR_PLAYER);
-    overlayCtx.lineWidth = 2;
+    if (netgame !== true && _cheating !== 0) {
+      overlayCtx.lineWidth = 1;
+      overlayCtx.beginPath();
+      for (const segment of AM_CheatPlayerSegments(p.mo)) {
+        const [x1, y1] = project(segment.a.x, segment.a.y);
+        const [x2, y2] = project(segment.b.x, segment.b.y);
+        overlayCtx.moveTo(x1, y1);
+        overlayCtx.lineTo(x2, y2);
+      }
+      overlayCtx.stroke();
+    } else {
+      const [px, py] = project(p.mo.x, p.mo.y);
+      const angle = (p.mo.angle >>> 0) / 0x100000000 * Math.PI * 2;
+      const r = 12;
+      overlayCtx.lineWidth = 2;
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(px + Math.cos(angle) * r, py - Math.sin(angle) * r);
+      overlayCtx.lineTo(px + Math.cos(angle + 2.5) * r * 0.7, py - Math.sin(angle + 2.5) * r * 0.7);
+      overlayCtx.lineTo(px + Math.cos(angle - 2.5) * r * 0.7, py - Math.sin(angle - 2.5) * r * 0.7);
+      overlayCtx.closePath();
+      overlayCtx.stroke();
+    }
+  }
+
+  // am_map.c:1285-1302,1341-1342 — the second IDDT mode draws every mobj as
+  // the original 16-map-unit thin triangle, walking each sector's thing list.
+  if (_cheating === 2 && sectors !== null) {
+    overlayCtx.strokeStyle = V_PaletteCSS(AM_THING_COLOR);
+    overlayCtx.lineWidth = 1;
     overlayCtx.beginPath();
-    overlayCtx.moveTo(px + Math.cos(angle) * r, py - Math.sin(angle) * r);
-    overlayCtx.lineTo(px + Math.cos(angle + 2.5) * r * 0.7, py - Math.sin(angle + 2.5) * r * 0.7);
-    overlayCtx.lineTo(px + Math.cos(angle - 2.5) * r * 0.7, py - Math.sin(angle - 2.5) * r * 0.7);
-    overlayCtx.closePath();
+    for (let i = 0; i < numsectors; i++) {
+      for (let thing = sectors[i].thinglist; thing !== null; thing = thing.snext) {
+        for (const segment of AM_ThingSegments(thing)) {
+          const [x1, y1] = project(segment.a.x, segment.a.y);
+          const [x2, y2] = project(segment.b.x, segment.b.y);
+          overlayCtx.moveTo(x1, y1);
+          overlayCtx.lineTo(x2, y2);
+        }
+      }
+    }
     overlayCtx.stroke();
   }
 
