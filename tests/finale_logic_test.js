@@ -34,6 +34,14 @@ Deno.test('Doom II chapter and ending finales select the reference content', () 
   assertEquals(F_GetFinaleSpec(GameMode_t.commercial, 1, 31).text, C6TEXT, 'MAP31 text');
 });
 
+Deno.test('indetermined finale uses the reference sky and Doom II text', () => {
+  for (const episode of [1, 2, 4, 99]) {
+    const spec = F_GetFinaleSpec(GameMode_t.indetermined, episode, 1);
+    assertEquals(spec.text, C1TEXT, `indetermined episode ${episode} text`);
+    assertEquals(spec.flat, 'F_SKY1', `indetermined episode ${episode} flat`);
+  }
+});
+
 Deno.test('commercial finale breakpoints match G_WorldDone', () => {
   for (const map of [6, 11, 20, 30]) {
     assertEquals(F_ShouldStartCommercialFinale(GameMode_t.commercial, map, false), true, `MAP${map}`);

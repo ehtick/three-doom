@@ -31,7 +31,14 @@ export function F_GetFinaleSpec(mode, episode, map) {
   if (mode === GameMode_t.commercial) {
     return DOOM2_FINALES[map] || Object.freeze({ flat: 'F_SKY1', text: C1TEXT });
   }
-  return DOOM1_FINALES[episode] || DOOM1_FINALES[1];
+  if (mode === GameMode_t.shareware ||
+      mode === GameMode_t.registered ||
+      mode === GameMode_t.retail) {
+    return DOOM1_FINALES[episode] || DOOM1_FINALES[1];
+  }
+  // f_finale.c's default/indetermined branch is deliberately Doom-II-like,
+  // independent of the episode number.
+  return Object.freeze({ flat: 'F_SKY1', text: C1TEXT });
 }
 
 // g_game.c:G_WorldDone: normal chapter breaks follow MAP06/11/20/30. The
