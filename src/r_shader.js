@@ -85,13 +85,13 @@ export function R_MakeIndexedTexture(indices, alphas, w, h) {
 // Per-view lighting is shared by every world material. R_SetupFrame updates
 // these once before rendering, just as vanilla sets its renderer globals.
 export const extralightUniform = { value: 0 };
-const viewFixedColormapUniform = { value: -1 };
+export const fixedColormapUniform = { value: -1 };
 
 export function R_SetViewLighting(extralight, fixedColormap) {
   extralightUniform.value = extralight;
   // player.fixedcolormap uses 0 as "disabled"; shader -1 selects normal
   // distance lighting, while positive values are literal COLORMAP rows.
-  viewFixedColormapUniform.value = fixedColormap === 0 ? -1 : fixedColormap;
+  fixedColormapUniform.value = fixedColormap === 0 ? -1 : fixedColormap;
 }
 
 // Sector-light range: vanilla snaps the 0..255 sector.lightlevel to one of
@@ -178,7 +178,7 @@ export function R_MakeDoomMaterial(map, { masked = false, side = THREE.FrontSide
       palette:       { value: _paletteTex },
       colormap:      { value: _colormapTex },
       extralight:    extralightUniform,
-      fixedColormap: fixedColormap >= 0 ? { value: fixedColormap } : viewFixedColormapUniform,
+      fixedColormap: fixedColormap >= 0 ? { value: fixedColormap } : fixedColormapUniform,
       masked:        { value: masked },
     },
     vertexShader:   VERT_SHADER,
@@ -188,4 +188,112 @@ export function R_MakeDoomMaterial(map, { masked = false, side = THREE.FrontSide
     transparent:    false,
     depthWrite,
   });
+}
+
+// THREE.Sprite uses a shared unit quad and expands it in view space. This is
+// the world-size branch of the r184 SpriteMaterial vertex transform, kept here
+// so indexed Doom sprites retain billboard rotation, perspective attenuation,
+// and Sprite.center patch origins while using a custom COLORMAP shader.
+const SPRITE_VERT_SHADER = /* glsl */ `
+uniform float rotation;
+uniform vec2 center;
+
+varying vec2 vUv;
+varying float vViewDepth;
+
+void main() {
+  vUv = uv;
+
+  vec4 mvPosition = modelViewMatrix[3];
+  vec2 scale = vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
+  vec2 alignedPosition = (position.xy - (center - vec2(0.5))) * scale;
+  vec2 rotatedPosition;
+  rotatedPosition.x = cos(rotation) * alignedPosition.x - sin(rotation) * alignedPosition.y;
+  rotatedPosition.y = sin(rotation) * alignedPosition.x + cos(rotation) * alignedPosition.y;
+  mvPosition.xy += rotatedPosition;
+
+  vViewDepth = -mvPosition.z;
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+// r_things.c:R_ProjectSprite chooses sprite colormaps in this order:
+// MF_SHADOW, fixedcolormap, FF_FULLBRIGHT, then sector/distance lighting.
+// The normal-light branch reconstructs vanilla's full-screen scalelight index:
+//   xscale = 160 / depth (16.16 fixed)
+//   index  = min(xscale >> 12, 47) = min(floor(2560 / depth), 47)
+//   row    = startmap - index / DISTMAP (integer division, DISTMAP=2)
+const SPRITE_FRAG_SHADER = /* glsl */ `
+uniform sampler2D map;
+uniform sampler2D palette;
+uniform sampler2D colormap;
+uniform float sectorLight;
+uniform float extralight;
+uniform float fixedColormap;
+uniform bool fullbright;
+uniform bool shadow;
+uniform float opacity;
+uniform float alphaCutoff;
+uniform float shadowTint;
+
+varying vec2 vUv;
+varying float vViewDepth;
+
+void main() {
+  vec2 texel = texture2D(map, vUv).rg;
+  float alpha = texel.g * opacity;
+  if (alpha < alphaCutoff) discard;
+
+  if (shadow) {
+    gl_FragColor = vec4(vec3(shadowTint), alpha);
+    return;
+  }
+
+  float row;
+  if (fixedColormap >= 0.0) {
+    row = fixedColormap;
+  } else if (fullbright) {
+    row = 0.0;
+  } else {
+    float lightIdx = clamp(sectorLight + extralight, 0.0, 15.0);
+    float startMap = (15.0 - lightIdx) * 4.0;
+    float scaleIndex = min(floor(2560.0 / max(vViewDepth, 1.0)), 47.0);
+    row = clamp(startMap - floor(scaleIndex / 2.0), 0.0, 31.0);
+  }
+
+  float palIdx = texel.r;
+  float remap = texture2D(colormap, vec2(palIdx, (row + 0.5) / 34.0)).r;
+  vec3 rgb = texture2D(palette, vec2(remap, 0.5)).rgb;
+  gl_FragColor = vec4(rgb, alpha);
+}
+`;
+
+export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowTint = 0.12 } = {}) {
+  if (_paletteTex === null || _colormapTex === null) {
+    throw new Error('R_MakeDoomSpriteMaterial called before R_ShaderInit');
+  }
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      map:           { value: map },
+      palette:       { value: _paletteTex },
+      colormap:      { value: _colormapTex },
+      sectorLight:   { value: 15 },
+      extralight:    extralightUniform,
+      fixedColormap: fixedColormapUniform,
+      fullbright:    { value: false },
+      shadow:        { value: false },
+      opacity:       { value: 1 },
+      alphaCutoff:   { value: alphaCutoff },
+      shadowTint:    { value: shadowTint },
+      center:        { value: new THREE.Vector2(0.5, 0.5) },
+      rotation:      { value: 0 },
+    },
+    vertexShader: SPRITE_VERT_SHADER,
+    fragmentShader: SPRITE_FRAG_SHADER,
+    transparent: true,
+    depthWrite: true,
+  });
+  // Sprite.raycast reads material.rotation even for a custom material.
+  material.rotation = 0;
+  return material;
 }

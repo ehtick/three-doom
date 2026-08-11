@@ -9,13 +9,14 @@
 import * as THREE from 'three';
 import { spritedef_t, spriteframe_t } from './r_defs.js';
 import { sprnames, states } from './info.js';
-import { firstspritelump, lastspritelump, playpal_rgba } from './r_data.js';
+import { firstspritelump, lastspritelump } from './r_data.js';
 import { W_CacheLumpNum } from './w_wad.js';
 import { lumpinfo } from './w_wad.js';
 import { I_Error } from './i_system.js';
 import { FRACBITS } from './m_fixed.js';
 import { patch_t } from './v_video.js';
 import { R_PointToAngle2 } from './r_bsp.js';
+import { R_MakeIndexedTexture, R_MakeDoomSpriteMaterial } from './r_shader.js';
 
 // ---------- Sprite definition tables ----------
 export let numsprites = 0;
@@ -103,18 +104,18 @@ export function R_InitSprites() {
 
 const _spriteTextureCache = new Map(); // lump index -> { tex, w, h, offsetX, offsetY }
 
-// Wrap an RGBA buffer as a sprite DataTexture with Doom's display settings.
-function makeSpriteDataTexture(data, w, h) {
-  const tex = new THREE.DataTexture(data, w, h, THREE.RGBAFormat);
+// Wrap palette indices + binary alpha in the same RG8 representation as Doom
+// world textures. Sprite rows are stored top-first, so flip on upload.
+function makeSpriteDataTexture(indices, alphas, w, h) {
+  const tex = R_MakeIndexedTexture(indices, alphas, w, h);
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.generateMipmaps = false;
   // Doom patches store row 0 at the top; THREE.Sprite samples V=0 at bottom.
   // Flip so sprites display upright (without flipY, they appear inverted).
   tex.flipY = true;
-  // sRGB so the shader linearises Doom's already-gamma-encoded palette colors
-  // before any lighting math; output sRGB then gamma-encodes the result.
-  tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
 }
@@ -126,8 +127,9 @@ function buildSpriteTexture(spriteLumpIndex) {
   const bytes = W_CacheLumpNum(lumpnum, 0);
   const p = patch_t(bytes);
   const w = p.width, h = p.height;
-  const rgba = new Uint8Array(w * h * 4);
-  // Decode column-post format into RGBA with alpha 0 for transparent pixels.
+  const indices = new Uint8Array(w * h);
+  const alphas = new Uint8Array(w * h);
+  // Decode column-post format into palette indices plus binary alpha.
   for (let col = 0; col < w; col++) {
     let colptr = p.columnofs(col);
     while (bytes[colptr] !== 0xff) {
@@ -136,17 +138,14 @@ function buildSpriteTexture(spriteLumpIndex) {
       const srcStart = colptr + 3;
       for (let i = 0; i < length; i++) {
         const y = topdelta + i;
-        const pix = bytes[srcStart + i] * 4;
-        const idx = (y * w + col) * 4;
-        rgba[idx + 0] = playpal_rgba[pix + 0];
-        rgba[idx + 1] = playpal_rgba[pix + 1];
-        rgba[idx + 2] = playpal_rgba[pix + 2];
-        rgba[idx + 3] = 255;
+        const idx = y * w + col;
+        indices[idx] = bytes[srcStart + i];
+        alphas[idx] = 255;
       }
       colptr += length + 4;
     }
   }
-  const tex = makeSpriteDataTexture(rgba, w, h);
+  const tex = makeSpriteDataTexture(indices, alphas, w, h);
   const info = { tex, texFlipped: null, w, h, offsetX: p.leftoffset, offsetY: p.topoffset };
   _spriteTextureCache.set(spriteLumpIndex, info);
   return info;
@@ -159,16 +158,17 @@ function getFlippedTexture(info) {
   if (info.texFlipped !== null) return info.texFlipped;
   const w = info.w, h = info.h;
   const src = info.tex.image.data;
-  const dst = new Uint8Array(w * h * 4);
+  const indices = new Uint8Array(w * h);
+  const alphas = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      const s = (y * w + (w - 1 - x)) * 4;
-      const d = (y * w + x) * 4;
-      dst[d] = src[s]; dst[d + 1] = src[s + 1];
-      dst[d + 2] = src[s + 2]; dst[d + 3] = src[s + 3];
+      const s = (y * w + (w - 1 - x)) * 2;
+      const d = y * w + x;
+      indices[d] = src[s];
+      alphas[d] = src[s + 1];
     }
   }
-  const tex = makeSpriteDataTexture(dst, w, h);
+  const tex = makeSpriteDataTexture(indices, alphas, w, h);
   info.texFlipped = tex;
   return tex;
 }
@@ -218,9 +218,15 @@ export function R_RegisterMobjSprite(mobj) {
   if (_thingsGroup === null) return; // level not yet rendered (boot transient)
   // Bare sprite — texture/scale/position set on first R_UpdateSprites pass.
   // We use a placeholder material so the sprite is valid even before the
-  // first update; R_UpdateSprites overwrites .map immediately.
-  const mat = new THREE.SpriteMaterial({ transparent: true, alphaTest: SPRITE_ALPHATEST, depthWrite: true });
+  // first update; R_UpdateSprites supplies its indexed map immediately.
+  const mat = R_MakeDoomSpriteMaterial(null, {
+    alphaCutoff: SPRITE_ALPHATEST,
+    shadowTint: SHADOW_TINT,
+  });
   const sprite = new THREE.Sprite(mat);
+  // WebGLRenderer only copies Sprite.center automatically for SpriteMaterial.
+  // Link the custom uniform to the same mutable Vector2 instead.
+  mat.uniforms.center.value = sprite.center;
   // Hide until R_UpdateSprites positions it — avoids a single-frame flash
   // at (0,0,0) for newly-spawned mobjs.
   sprite.visible = false;
@@ -288,9 +294,8 @@ export function R_UpdateSprites() {
     if (lumpIdx < 0) continue;
     const t = buildSpriteTexture(lumpIdx);
     const tex = flipped === 1 ? getFlippedTexture(t) : t.tex;
-    if (entry.sprite.material.map !== tex) {
-      entry.sprite.material.map = tex;
-      entry.sprite.material.needsUpdate = true;
+    if (entry.sprite.material.uniforms.map.value !== tex) {
+      entry.sprite.material.uniforms.map.value = tex;
     }
     if (entry.sprite.scale.x !== t.w || entry.sprite.scale.y !== t.h) {
       entry.sprite.scale.set(t.w, t.h, 1);
@@ -327,45 +332,46 @@ export function R_UpdateSprites() {
     // billboard for a dark, translucent, shimmering one. The flag can toggle at
     // runtime (the powerup wears off), so switch material modes on change.
     const mat = entry.sprite.material;
+    const uniforms = mat.uniforms;
     if (isShadow !== entry._isShadow) {
       if (isShadow) {
         mat.depthWrite = false; // translucent: don't occlude what's behind it
-        mat.color.setRGB(SHADOW_TINT, SHADOW_TINT, SHADOW_TINT);
-        // The default alphaTest (0.5) compares against texAlpha * opacity. At
+        uniforms.shadow.value = true;
+        // The default alpha cutoff (0.5) compares against texAlpha * opacity. At
         // SHADOW_OPACITY (~0.33) every silhouette texel falls under 0.5 and gets
         // discarded — the Spectre vanishes entirely. Drop the threshold below the
         // flickering opacity floor so the silhouette survives, while the fully
         // transparent surround (alpha 0) is still culled.
-        mat.alphaTest = SHADOW_ALPHATEST;
+        uniforms.alphaCutoff.value = SHADOW_ALPHATEST;
       } else {
-        mat.opacity = 1;
+        uniforms.shadow.value = false;
+        uniforms.opacity.value = 1;
         mat.depthWrite = true;
-        mat.alphaTest = SPRITE_ALPHATEST; // restore the opaque-sprite cutout
-        entry._lastLight = -1; // force the light tint below to re-apply
+        uniforms.alphaCutoff.value = SPRITE_ALPHATEST;
+        entry._lastLightBucket = -1;
+        entry._lastFullbright = null;
       }
-      mat.needsUpdate = true;
       entry._isShadow = isShadow;
     }
 
     if (isShadow) {
       // Per-frame flicker mimics fuzzcolfunc's shimmering static.
-      mat.opacity = SHADOW_OPACITY + (Math.random() - 0.5) * 2 * SHADOW_FLICKER;
+      uniforms.opacity.value = SHADOW_OPACITY + (Math.random() - 0.5) * 2 * SHADOW_FLICKER;
     } else {
-      // Sector lighting: vanilla r_things.c:R_ProjectSprite picks a colormap row
-      // from the sector's lightlevel (and distance, via spritelights[]); we
-      // approximate by tinting the sprite material with the lightlevel scaled
-      // 0..1. FF_FULLBRIGHT (projectiles, fireballs, plasma) overrides.
-      const fullbright = (st.frame & FF_FULLBRIGHT) !== 0;
-      let light = 1;
-      if (fullbright !== true && mo.subsector !== null && mo.subsector.sector !== null) {
-        light = (mo.subsector.sector.lightlevel | 0) / 255;
-        if (light < 0) light = 0; else if (light > 1) light = 1;
+      // R_AddSprites selects a sector bucket before R_ProjectSprite applies
+      // fixed/fullbright/distance precedence in the shader.
+      const fullbright = (mo.frame & FF_FULLBRIGHT) !== 0;
+      let lightBucket = 15;
+      if (mo.subsector !== null && mo.subsector.sector !== null) {
+        lightBucket = mo.subsector.sector.lightlevel >> 4;
       }
-      // Skip the material uniform write when the sector light is unchanged —
-      // typical for thinkers standing still in a static-light room.
-      if (entry._lastLight !== light) {
-        mat.color.setRGB(light, light, light);
-        entry._lastLight = light;
+      if (entry._lastLightBucket !== lightBucket) {
+        uniforms.sectorLight.value = lightBucket;
+        entry._lastLightBucket = lightBucket;
+      }
+      if (entry._lastFullbright !== fullbright) {
+        uniforms.fullbright.value = fullbright;
+        entry._lastFullbright = fullbright;
       }
     }
     if (entry.sprite.visible === false) entry.sprite.visible = true;
