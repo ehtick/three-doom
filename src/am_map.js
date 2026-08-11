@@ -16,6 +16,7 @@ import { evtype_t } from './d_event.js';
 import { FixedMul, FRACUNIT } from './m_fixed.js';
 import { finecosine, finesine } from './tables.js';
 import { V_PaletteCSS } from './v_palette.js';
+import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
 import {
   AMSTR_FOLLOWON, AMSTR_FOLLOWOFF, AMSTR_GRIDON, AMSTR_GRIDOFF,
   AMSTR_MARKEDSPOT, AMSTR_MARKSCLEARED,
@@ -67,7 +68,6 @@ const COLOR_ALLMAP     = 6 * 16 + 3;     // GRAYS + 3
 export const AM_THING_COLOR = 7 * 16;    // THINGCOLORS (GREENS)
 const COLOR_PLAYER     = 256 - 47;        // YOURCOLORS (WHITE)
 const COLOR_GRID       = 6 * 16 + 8;     // GRIDCOLORS (GRAYS + 8)
-const COLOR_MARK       = 103;            // opaque AMMNUM patch pixel index
 export const AM_CROSSHAIR_COLOR = 6 * 16; // XHAIRCOLORS (GRAYS)
 const PLAYER_COLORS    = [7 * 16, 6 * 16, 4 * 16, 256 - 5 * 16];
 const COLOR_INVISIBLE_PLAYER = 246;
@@ -211,6 +211,7 @@ export function AM_PlayerDrawPlan({
 const AM_NUMMARKPOINTS = 10;
 const _markpoints = [];
 for (let i = 0; i < AM_NUMMARKPOINTS; i++) _markpoints.push({ x: -1, y: -1 });
+const _marknums = new Array(AM_NUMMARKPOINTS).fill(null);
 let _markpointnum = 0;
 
 // am_map.c:524 — AM_clearMarks.
@@ -247,6 +248,11 @@ export function AM_Start() {
     _lastEpisode = gameepisode;
   } else {
     _viewState = AM_OpenView(_viewState, mo);
+  }
+  // am_map.c:AM_loadPics — marker digits are real WAD patches, not browser
+  // text. V_DecodePatchToCanvas retains the cache-equivalent backing data.
+  for (let i = 0; i < AM_NUMMARKPOINTS; i++) {
+    _marknums[i] = V_DecodePatchToCanvas(`AMMNUM${i}`);
   }
   set_automapactive(true);
 }
@@ -440,17 +446,22 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     sy,
   );
 
-  // Player-placed marks (am_map.c:AM_drawMarks).
-  overlayCtx.fillStyle = V_PaletteCSS(COLOR_MARK);
-  overlayCtx.font = 'bold 10px monospace';
-  overlayCtx.textAlign = 'center';
-  overlayCtx.textBaseline = 'middle';
+  // am_map.c:AM_drawMarks — WAD digits are anchored at the projected point;
+  // the source deliberately uses literal 5x6 visibility bounds.
   for (let i = 0; i < AM_NUMMARKPOINTS; i++) {
     const m = _markpoints[i];
     if (m.x === -1) continue;
-    const [mx, my] = project(m.x, m.y);
-    if (mx < dstX || mx > dstX + dstW || my < dstY || my > dstY + dstH) continue;
-    overlayCtx.fillText(String(i), mx, my);
+    const point = AM_ProjectFixedPoint(_viewState, m.x, m.y);
+    if (point.x < 0 || point.x > AM_FRAME_WIDTH - 5 ||
+        point.y < 0 || point.y > AM_FRAME_HEIGHT - 6) continue;
+    V_DrawPatchAtCanvas(
+      overlayCtx,
+      _marknums[i],
+      dstX + point.x * sx,
+      dstY + point.y * sy,
+      sx,
+      sy,
+    );
   }
   overlayCtx.restore();
 }

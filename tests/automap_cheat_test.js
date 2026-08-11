@@ -259,3 +259,13 @@ Deno.test('browser input fans every level key to AM_Responder after cheats', asy
     throw new Error('level keys do not reach AM_Responder in reference order');
   }
 });
+
+Deno.test('automap marks use WAD patches instead of browser text', async () => {
+  const source = await Deno.readTextFile(new URL('../src/am_map.js', import.meta.url));
+  const drawer = source.slice(source.indexOf('export function AM_Drawer'));
+  if (!source.includes("V_DecodePatchToCanvas(`AMMNUM${i}`)") ||
+      !drawer.includes('V_DrawPatchAtCanvas(') ||
+      drawer.includes('fillText(') || drawer.includes('.font =')) {
+    throw new Error('automap marks are not rendered through AMMNUM WAD patches');
+  }
+});

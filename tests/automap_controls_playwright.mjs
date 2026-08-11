@@ -69,7 +69,8 @@ try {
     const originalDrawImage = proto.drawImage;
     let mapStatusDraws = 0;
     proto.fillRect = function (...args) {
-      if ((new Error().stack ?? '').includes('/src/am_map')) {
+      if ((new Error().stack ?? '').includes('/src/am_map') &&
+          args[2] > 100 && args[3] > 100) {
         layoutRects.push(args.slice(0, 4));
       }
       return originalFillRect.apply(this, args);
@@ -122,10 +123,12 @@ try {
       lineTo: ctx.lineTo.bind(ctx),
       closePath: ctx.closePath.bind(ctx),
       stroke: ctx.stroke.bind(ctx),
+      drawImage: ctx.drawImage.bind(ctx),
     };
 
     const capture = () => {
       const paths = [];
+      const markPatches = [];
       let path = [];
       ctx.beginPath = function () { path = []; return originals.beginPath(); };
       ctx.moveTo = function (x, y) { path.push(['m', x, y]); return originals.moveTo(x, y); };
@@ -135,6 +138,10 @@ try {
         paths.push({ style: this.strokeStyle, path: structuredClone(path) });
         return originals.stroke();
       };
+      ctx.drawImage = function (image, ...args) {
+        markPatches.push({ source: [image.width, image.height], args: structuredClone(args) });
+        return originals.drawImage(image, ...args);
+      };
       automap.AM_Drawer(ctx, 0, 0, 960, 504);
       const geometry = paths
         .filter((entry) => entry.style !== gridStyle)
@@ -143,6 +150,7 @@ try {
       return {
         gridStrokes: paths.filter((entry) => entry.style === gridStyle).length,
         geometry,
+        markPatches,
       };
     };
 
@@ -208,9 +216,11 @@ try {
     key('keydown', 'KeyM', 'm');
     key('keyup', 'KeyM', 'm');
     const markReady = await waitFor(() => player.message === 'Marked Spot 0');
+    const marked = capture();
     key('keydown', 'KeyC', 'c');
     key('keyup', 'KeyC', 'c');
     const clearReady = await waitFor(() => player.message === 'All Marks Cleared');
+    const cleared = capture();
 
     key('keydown', 'Tab', 'Tab');
     key('keyup', 'Tab', 'Tab');
@@ -243,6 +253,8 @@ try {
       gridOffStrokes: gridOff.gridStrokes,
       markReady,
       clearReady,
+      markedPatches: marked.markPatches,
+      clearedPatches: cleared.markPatches,
       mapClosed: doomstat.automapactive === false,
     };
   });
@@ -281,6 +293,13 @@ try {
   if (!result.gridOnReady || result.gridOnStrokes !== 1) failures.push('G did not enable the grid draw pass');
   if (!result.gridOffReady || result.gridOffStrokes !== 0) failures.push('second G did not disable grid drawing');
   if (!result.markReady || !result.clearReady) failures.push('mark/clear messages were not published');
+  if (result.markedPatches.length !== 1 || result.clearedPatches.length !== 0 ||
+      JSON.stringify(result.markedPatches[0]?.source) !== JSON.stringify([3, 5])) {
+    failures.push(`marks did not use the AMMNUM0 WAD patch: ${JSON.stringify({
+      marked: result.markedPatches,
+      cleared: result.clearedPatches,
+    })}`);
+  }
   if (!result.mapClosed) failures.push('Tab did not close the automap');
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
