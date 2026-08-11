@@ -356,6 +356,9 @@ function resize() {
   const h = window.innerHeight;
   overlayCanvas.width  = w;
   overlayCanvas.height = h;
+  // Setting either canvas dimension resets every 2D context attribute.
+  // Restore Doom's nearest-neighbour presentation before the next blit.
+  if (overlayCtx !== null) overlayCtx.imageSmoothingEnabled = false;
   if (renderer) { renderer.setSize(w, h); }
   configureViewCamera(camera);
 }
