@@ -40,7 +40,11 @@ import * as _PMobj from './p_mobj.js';
 import * as _PTick from './p_tick.js';
 import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
-import { D_AdvanceSimulationClock } from './d_timing.js';
+import {
+  D_AdvanceSimulationClock,
+  D_CreateVisibilitySuspension,
+  D_VisibilityFrameState,
+} from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_PausePatchPosition, D_ShouldStartWipe } from './d_display_logic.js';
 import { R_CalculateCanvasView, R_GetViewSize } from './r_view.js';
@@ -349,6 +353,7 @@ function D_Display() {
 // requestAnimationFrame and a 35Hz tic accumulator.
 let _lastTime = 0;
 let _ticAccum = 0;
+let _visibilitySuspension = null;
 let _pTicker = null;
 let _updateSprites = null;
 let _drawPlayerSprites = null;
@@ -390,6 +395,8 @@ const _localCommandPlayer = { cmd: doomstat.localcmds[0] };
 function D_ClearLoopReferences() {
   _lastTime = 0;
   _ticAccum = 0;
+  _visibilitySuspension?.dispose();
+  _visibilitySuspension = null;
   _overlayCanvas = null;
   _overlayCtx = null;
   _oldDisplayGameState = -1;
@@ -441,6 +448,10 @@ async function D_DoomLoop() {
   }
   _lastTime = 0;
   _ticAccum = 0;
+  _visibilitySuspension?.dispose();
+  _visibilitySuspension = D_CreateVisibilitySuspension(
+    typeof document === 'undefined' ? null : document,
+  );
   _pTicker = (await import('./p_tick.js')).P_Ticker;
   _updateSprites = (await import('./r_things.js')).R_UpdateSprites;
   _drawPlayerSprites = (await import('./r_psprite.js')).R_DrawPlayerSprites;
@@ -502,7 +513,10 @@ async function D_DoomLoop() {
     // forward and the helper retains only the sub-tic wall-clock phase, rather
     // than replaying whole wipe tics as a post-wipe catch-up burst.
     const wipeActive = _fwipeActive !== null && _fwipeActive() === true;
-    const clock = D_AdvanceSimulationClock(_ticAccum, dt, wipeActive, doomstat.singletics);
+    const visibilityState = _visibilitySuspension?.frameState() ??
+      D_VisibilityFrameState.active;
+    const clock = D_AdvanceSimulationClock(_ticAccum, dt, wipeActive,
+      doomstat.singletics, visibilityState);
     _ticAccum = clock.remainder;
     let dueTics = clock.due;
     while (dueTics-- > 0) {

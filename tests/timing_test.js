@@ -1,4 +1,10 @@
-import { D_AccumulateTics, D_AdvanceSimulationClock } from '../src/d_timing.js';
+import {
+  D_AccumulateTics,
+  D_AdvanceSimulationClock,
+  D_CreateVisibilitySuspension,
+  D_SUSPENSION_TIC_CAP,
+  D_VisibilityFrameState,
+} from '../src/d_timing.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -50,4 +56,60 @@ Deno.test('singletics advances exactly once per non-wipe rendered frame', () => 
   }
   const wipe = D_AdvanceSimulationClock(0.25, 1 / 60, true, true);
   assertEquals(wipe.due, 0, 'singletics remains frozen during a wipe');
+});
+
+Deno.test('hidden frames freeze and resume through the native command-buffer cap', () => {
+  const hidden = D_AdvanceSimulationClock(
+    0.75, 60, false, false, D_VisibilityFrameState.hidden,
+  );
+  assertEquals(hidden.due, 0, 'hidden frame due tics');
+  if (Math.abs(hidden.remainder - 0.75) > Number.EPSILON * 4) {
+    throw new Error(`hidden frame phase: expected 0.75, got ${hidden.remainder}`);
+  }
+
+  const resumed = D_AdvanceSimulationClock(
+    hidden.remainder, 60, false, false, D_VisibilityFrameState.resumed,
+  );
+  assertEquals(resumed.due, D_SUSPENSION_TIC_CAP, 'resumed tic cap');
+  if (Math.abs(resumed.remainder - 0.75) > Number.EPSILON * 4) {
+    throw new Error(`resumed frame phase: expected 0.75, got ${resumed.remainder}`);
+  }
+
+  const visibleSlowFrame = D_AdvanceSimulationClock(
+    0, 0.2, false, false, D_VisibilityFrameState.active,
+  );
+  assertEquals(visibleSlowFrame.due, 7, 'visible 5 Hz frame still catches up');
+});
+
+Deno.test('visibility suspension survives hidden RAFs and disposes its listener', () => {
+  const listeners = new Set();
+  const target = {
+    visibilityState: 'visible',
+    addEventListener(type, listener) {
+      if (type === 'visibilitychange') listeners.add(listener);
+    },
+    removeEventListener(type, listener) {
+      if (type === 'visibilitychange') listeners.delete(listener);
+    },
+    dispatch() {
+      for (const listener of listeners) listener();
+    },
+  };
+  const suspension = D_CreateVisibilitySuspension(target);
+  assertEquals(listeners.size, 1, 'installed visibility listener');
+  assertEquals(suspension.frameState(), D_VisibilityFrameState.active, 'initial frame');
+
+  target.visibilityState = 'hidden';
+  target.dispatch();
+  assertEquals(suspension.frameState(), D_VisibilityFrameState.hidden, 'first hidden RAF');
+  assertEquals(suspension.frameState(), D_VisibilityFrameState.hidden, 'later hidden RAF');
+
+  target.visibilityState = 'visible';
+  target.dispatch();
+  assertEquals(suspension.frameState(), D_VisibilityFrameState.resumed, 'first resumed RAF');
+  assertEquals(suspension.frameState(), D_VisibilityFrameState.active, 'second visible RAF');
+
+  suspension.dispose();
+  suspension.dispose();
+  assertEquals(listeners.size, 0, 'disposed visibility listener');
 });
