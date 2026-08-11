@@ -19,3 +19,7 @@ export function P_KeyStaysInWorld(netgame) {
 export function P_PickupSoundIsLocal(player, players, consoleplayer) {
   return player === players[consoleplayer];
 }
+
+export function P_MegasphereAvailable(gamemode) {
+  return gamemode === 2 /*commercial*/;
+}

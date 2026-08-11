@@ -15,7 +15,7 @@ import { MT_MISC0, MT_MISC1, MT_MISC2, MT_MISC3, MT_MISC4, MT_MISC5, MT_MISC6,
 import { ammotype_t, weapontype_t, skill_t } from './doomdef.js';
 import { P_Random } from './m_random.js';
 import {
-  P_KeyStaysInWorld, P_PickupSoundIsLocal,
+  P_KeyStaysInWorld, P_MegasphereAvailable, P_PickupSoundIsLocal,
   P_WeaponAmmoClips, P_WeaponStaysInWorld,
 } from './p_pickup_logic.js';
 import { P_DropWeaponOnDeath } from './p_death_logic.js';
@@ -163,6 +163,9 @@ export function P_TouchSpecialThing(special, toucher) {
       sound = 93 /*sfx_getpow*/;
       break;
     case MT_MEGA:
+      // p_inter.c:409-417 — the megasphere sprite exists in Doom II only;
+      // custom Doom 1 maps that place it must leave it untouched.
+      if (!P_MegasphereAvailable(gamemode)) return;
       player.health = 200;
       if (player.mo !== null) player.mo.health = 200;
       P_GiveArmor(player, 2);
@@ -267,7 +270,7 @@ import { P_SetMobjState, MF_SHOOTABLE, MF_FLOAT, MF_SKULLFLY,
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine, ANG180 } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { FixedMul } from './m_fixed.js';
-import { gameskill, players as _players, consoleplayer, netgame, deathmatch } from './doomstat.js';
+import { gameskill, gamemode, players as _players, consoleplayer, netgame, deathmatch } from './doomstat.js';
 
 export function P_KillMobj(source, target) {
   if (target.info === null) return;

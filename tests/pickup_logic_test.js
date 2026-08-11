@@ -1,5 +1,5 @@
 import {
-  P_KeyStaysInWorld, P_PickupSoundIsLocal,
+  P_KeyStaysInWorld, P_MegasphereAvailable, P_PickupSoundIsLocal,
   P_WeaponAmmoClips, P_WeaponStaysInWorld,
 } from '../src/p_pickup_logic.js';
 
@@ -40,5 +40,16 @@ Deno.test('pickup sound belongs only to the console player', async () => {
   const source = await Deno.readTextFile(new URL('../src/p_inter.js', import.meta.url));
   if (!source.includes('P_PickupSoundIsLocal(player, _players, consoleplayer)')) {
     throw new Error('P_TouchSpecialThing does not gate its final pickup sound');
+  }
+});
+
+Deno.test('megaspheres are collectible only in commercial mode', async () => {
+  for (const [mode, expected] of [[0, false], [1, false], [2, true], [3, false], [4, false]]) {
+    assertEquals(P_MegasphereAvailable(mode), expected, `gamemode ${mode}`);
+  }
+  const source = await Deno.readTextFile(new URL('../src/p_inter.js', import.meta.url));
+  const mega = source.slice(source.indexOf('case MT_MEGA:'), source.indexOf('// Ammo.'));
+  if (!mega.includes('if (!P_MegasphereAvailable(gamemode)) return;')) {
+    throw new Error('MT_MEGA does not preserve Doom 1/custom-map spheres');
   }
 });
