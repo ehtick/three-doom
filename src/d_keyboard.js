@@ -88,24 +88,11 @@ async function onKeyDown(e) {
         sendpause = true;
         return;
       }
-      // Intermission screen — any keypress advances. Check this before
-      // automap / cheats so the press-to-continue gesture isn't mistaken
-      // for an in-game action. (gamestate_t.GS_INTERMISSION === 1)
-      //
-      // ALWAYS consume non-menu key handling while gamestate==INTERMISSION,
-      // even if WI_Responder returns false (it does once WI._active flips off
-      // after onDone fires — there's a 1-tic gap before gamestate transitions
-      // to GS_LEVEL). M_Responder has already had vanilla's first refusal;
-      // Escape can therefore still open or navigate the global menu.
+      // Intermission input is polled from complete ticcmds by WI_Ticker.
+      // M_Responder already had first refusal above (so Escape/F11 still work);
+      // swallow the remaining direct handlers to keep letters and arrows out
+      // of automap/cheats while retaining their held-key state for buildCmd.
       if (doomstat.gamestate === 1 /*GS_INTERMISSION*/) {
-        // Ignore keyboard auto-repeat so a held key accelerates the tally only
-        // once per physical press — matches vanilla WI_checkForAccelerate's
-        // rising-edge (attackdown/usedown) debounce.
-        if (e.repeat !== true) {
-          const wi = await import('./wi_stuff.js');
-          if (listenerIsActive(generation) !== true) return;
-          wi.WI_Responder({ type: 0, data1: e.keyCode | 0 });
-        }
         e.preventDefault?.();
         return;
       }

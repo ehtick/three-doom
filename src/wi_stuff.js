@@ -15,13 +15,14 @@
 // WI_drawNetgameStats) are intentionally omitted — they are unreachable in this
 // single-player port.
 
-import { gamemode } from './doomstat.js';
+import { gamemode, players, playeringame } from './doomstat.js';
 import { GameMode_t, TICRATE, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
 import { S_StartSound, S_ChangeMusic } from './s_sound.js';
 import { M_Random } from './m_random.js';
 import { mus_inter, mus_dm2int, sfx_pistol, sfx_barexp, sfx_sgcock } from './sounds.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
+import { WI_CheckForAccelerate } from './wi_input_logic.js';
 
 // ----------------------------------------------------------------------------
 // Par-time tables (g_game.c:978/987). Vanilla stores these in g_game and bakes
@@ -545,17 +546,9 @@ function WI_drawStats() {
 // Ticker / responder / drawer / start
 // ----------------------------------------------------------------------------
 
-// wi_stuff.c:412 — vanilla WI_Responder is a stub; acceleration is polled from
-// ticcmd buttons in WI_checkForAccelerate. This port is event-driven during
-// intermission (no ticcmd is built), so a keypress sets acceleratestage here.
-// Auto-repeat is filtered upstream (d_keyboard) so each physical press counts
-// once — equivalent to vanilla's rising-edge attack/use debounce.
-export function WI_Responder(ev) {
-  if (_active !== true) return false;
-  if (ev !== null && ev !== undefined && ev.type === 0) {
-    acceleratestage = 1;
-    return true;
-  }
+// wi_stuff.c:412-417 — timing-sensitive intermission input is never driven by
+// raw events. WI_Ticker polls the active players' attack/use ticcmd edges.
+export function WI_Responder(_ev) {
   return false;
 }
 
@@ -572,7 +565,8 @@ export function WI_Ticker() {
     else S_ChangeMusic(mus_inter, true);
   }
 
-  // acceleratestage is supplied by WI_Responder (see note above).
+  // wi_stuff.c:1517 — poll after the music edge and before the state update.
+  if (WI_CheckForAccelerate(players, playeringame)) acceleratestage = 1;
 
   switch (state) {
     case StatCount:   WI_updateStats();       break;
