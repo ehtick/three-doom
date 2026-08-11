@@ -161,6 +161,7 @@ export let mouseSensitivity = 5;
 export let singletics  = false;
 export let bodyqueslot = 0;
 export let skyflatnum  = -1;
+export function set_mouseSensitivity(v) { mouseSensitivity = v; }
 export function set_singletics(v)  { singletics = v; }
 export function set_bodyqueslot(v) { bodyqueslot = v; }
 // p_map.js / p_mobj.js read skyflatnum off globalThis to avoid an import

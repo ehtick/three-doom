@@ -12,6 +12,7 @@
 import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
   players, consoleplayer,
+  mouseSensitivity, set_mouseSensitivity,
 } from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
   KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_F11 } from './doomdef.js';
@@ -67,7 +68,6 @@ let _detailLevel  = 0;  // 0=high, 1=low
 // is screenSize = screenblocks - 3 = 6 (m_menu.c:1854).
 let _screenSize   = 6;
 let _screenblocks = 9;
-let _mouseSens    = 5;
 
 export function getScreenblocks() { return _screenblocks; }
 export function isStatusBarVisible() { return _screenblocks < 11; }
@@ -124,7 +124,7 @@ const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
   { patch: 'M_DETAIL', label: 'Graphic Detail',    action: () => { _detailLevel ^= 1; } },
   { patch: 'M_SCRNSZ', label: 'Screen Size',       slider: true, get: () => _screenSize, set: (v) => M_SizeDisplay(v > _screenSize ? 1 : 0) },
   { spacer: true },
-  { patch: 'M_MSENS',  label: 'Mouse Sensitivity', slider: true, get: () => _mouseSens,  set: (v) => { _mouseSens  = Math.max(0, Math.min(9, v)); } },
+  { patch: 'M_MSENS',  label: 'Mouse Sensitivity', slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
   { spacer: true },
   { patch: 'M_SVOL',   label: 'Sound Volume',      action: () => pushMenu(SOUND_MENU) },
 ]};
@@ -140,7 +140,7 @@ OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
   _drawPatchDoom(ctx, _detailLevel === 0 ? 'M_GDHIGH' : 'M_GDLOW', x + 175, y + LH * opt_detail, lx, ly, sx, sy);
   // msgNames[showMessages] (0=off,1=on) beside the Messages label.
   _drawPatchDoom(ctx, showMessages === true ? 'M_MSGON' : 'M_MSGOFF', x + 120, y + LH * opt_messages, lx, ly, sx, sy);
-  M_DrawThermo(ctx, x, y + LH * (opt_mousesens + 1), 10, _mouseSens,  lx, ly, sx, sy);
+  M_DrawThermo(ctx, x, y + LH * (opt_mousesens + 1), 10, mouseSensitivity, lx, ly, sx, sy);
   M_DrawThermo(ctx, x, y + LH * (opt_scrnsize  + 1),  9, _screenSize, lx, ly, sx, sy);
 };
 

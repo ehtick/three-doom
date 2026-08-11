@@ -123,9 +123,29 @@ try {
     document.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
     const gameplayRelease = sample();
 
+    // Navigate the real Options menu to its Mouse Sensitivity slider. The
+    // slider's live doomstat binding must feed the DOM movement adapter, whose
+    // 7-pixel axes truncate at sensitivity 4 from 6.3 to 6.
+    key('keydown', 'Escape', 'Escape');
+    key('keydown', 'ArrowDown', 'ArrowDown');
+    key('keydown', 'ArrowDown', 'ArrowDown');
+    key('keydown', 'Enter', 'Enter');
+    key('keydown', 'ArrowDown', 'ArrowDown');
+    key('keydown', 'ArrowDown', 'ArrowDown');
+    key('keydown', 'ArrowDown', 'ArrowDown');
+    const sensitivityBefore = doomstat.mouseSensitivity;
+    key('keydown', 'ArrowLeft', 'ArrowLeft');
+    const sensitivityAfter = doomstat.mouseSensitivity;
+    key('keydown', 'Escape', 'Escape');
+    key('keydown', 'Escape', 'Escape');
+    lockedCanvas = canvas;
+    mouseMove(7, -7);
+    const sensitivityMovement = sample();
+
     const netgameDuringCheck = doomstat.netgame;
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
+    doomstat.set_mouseSensitivity(5);
     menu.M_ClearMenus();
     return {
       beforeMenu,
@@ -137,6 +157,9 @@ try {
       gameplayRelease,
       pointerRequests,
       netgameDuringCheck,
+      sensitivityBefore,
+      sensitivityAfter,
+      sensitivityMovement,
     };
   });
 
@@ -152,6 +175,15 @@ try {
   if (!zero(result.gameplayRelease)) failures.push('mouseup did not clear gameplay button');
   if (result.pointerRequests !== 1) failures.push(`pointer lock requests: expected 1, got ${result.pointerRequests}`);
   if (result.netgameDuringCheck !== true) failures.push('netgame responder case was not exercised');
+  if (result.sensitivityBefore !== 5 || result.sensitivityAfter !== 4) {
+    failures.push(`mouse slider did not update doomstat (before ${result.sensitivityBefore}, after ${result.sensitivityAfter})`);
+  }
+  if (result.sensitivityMovement.forwardmove !== 6 ||
+      result.sensitivityMovement.sidemove !== 0 ||
+      result.sensitivityMovement.angleturn !== -48 ||
+      result.sensitivityMovement.buttons !== 0) {
+    failures.push(`scaled mouse movement mismatch: ${JSON.stringify(result.sensitivityMovement)}`);
+  }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
   console.log(JSON.stringify(result));

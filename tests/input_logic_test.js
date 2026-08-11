@@ -1,6 +1,7 @@
 import {
   D_ComputeMovement,
   D_MouseStrafePressed,
+  D_ScaleMouseDelta,
   D_ShouldCaptureGameplayPress,
 } from '../src/d_input_logic.js';
 
@@ -82,5 +83,22 @@ Deno.test('menu responder consumption has precedence over gameplay presses', () 
   }
   if (D_ShouldCaptureGameplayPress(true) !== false) {
     throw new Error('menu-consumed input leaked into gameplay');
+  }
+});
+
+Deno.test('mouse sensitivity uses vanilla integer truncation toward zero', () => {
+  const cases = [
+    [1, 0, 0], [-1, 0, 0], [3, 0, 1], [-3, 0, -1],
+    [4, 1, 2], [-4, 1, -2], [9, 2, 6], [-9, 2, -6],
+    [7, 3, 5], [-7, 3, -5], [7, 4, 6], [-7, 4, -6],
+    [123, 5, 123], [-123, 5, -123],
+    [9, 6, 9], [-9, 6, -9], [9, 7, 10], [-9, 7, -10],
+    [9, 8, 11], [-9, 8, -11], [9, 9, 12], [-9, 9, -12],
+  ];
+  for (const [delta, sensitivity, expected] of cases) {
+    const actual = D_ScaleMouseDelta(delta, sensitivity);
+    if (actual !== expected || Object.is(actual, -0)) {
+      throw new Error(`delta ${delta}, sensitivity ${sensitivity}: expected ${expected}, got ${actual}`);
+    }
   }
 });

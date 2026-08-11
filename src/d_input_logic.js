@@ -34,6 +34,14 @@ export function D_ShouldCaptureGameplayPress(menuConsumed) {
   return menuConsumed !== true;
 }
 
+// g_game.c:G_Responder scales each mouse axis with integer arithmetic:
+//   delta * (mouseSensitivity + 5) / 10
+// C integer division truncates toward zero. The final bitwise conversion also
+// normalizes Math.trunc(-0.5)'s JavaScript -0 to Doom's integer zero.
+export function D_ScaleMouseDelta(delta, mouseSensitivity) {
+  return Math.trunc((delta | 0) * ((mouseSensitivity | 0) + 5) / 10) | 0;
+}
+
 export function D_ComputeMovement(input, turnheld) {
   const fast = input.fast === true;
   const forwardStep = fast ? 50 : 25;

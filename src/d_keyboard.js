@@ -6,7 +6,12 @@
 
 import { renderer, I_RegisterGraphicsShutdownHook, I_TranslateKey } from './i_video.js';
 import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT, evtype_t } from './d_event.js';
-import { D_ComputeMovement, D_MouseStrafePressed, D_ShouldCaptureGameplayPress } from './d_input_logic.js';
+import {
+  D_ComputeMovement,
+  D_MouseStrafePressed,
+  D_ScaleMouseDelta,
+  D_ShouldCaptureGameplayPress,
+} from './d_input_logic.js';
 import * as doomstat from './doomstat.js';
 
 // Cache cross-module references at module load — keystrokes are a hot path
@@ -192,8 +197,11 @@ function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
 function onMouseMove(e) {
     if (doomstat.menuactive !== true &&
         renderer !== null && document.pointerLockElement === renderer.domElement) {
-      mouseDX += e.movementX;
-      mouseDY -= e.movementY;
+      // g_game.c:G_Responder applies sensitivity before G_BuildTiccmd consumes
+      // the axes. Preserve that per-event truncation while accumulating the
+      // browser's pointer-lock movement events until the next 35 Hz tic.
+      mouseDX += D_ScaleMouseDelta(e.movementX, doomstat.mouseSensitivity);
+      mouseDY += D_ScaleMouseDelta(-e.movementY, doomstat.mouseSensitivity);
     }
 }
 
