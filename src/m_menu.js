@@ -20,7 +20,8 @@ export {
   snd_MusicVolume as musicVolume,
 } from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
-  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F1, KEY_F11 } from './doomdef.js';
+  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F1,
+  KEY_F11 } from './doomdef.js';
 import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
@@ -50,6 +51,7 @@ import { M_ALPHA_KEYS, M_FindAlphaItem } from './m_menu_alpha_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { M_ReadThisPlan } from './m_menu_read_logic.js';
+import { M_ClosedShortcutRoute } from './m_menu_shortcut_logic.js';
 import { HU_DrawLayout, HU_GetFont } from './hu_font.js';
 import { M_LayoutMessage } from './m_menu_text.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
@@ -180,7 +182,7 @@ SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
 const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
   { patch: 'M_ENDGAM', label: 'End Game', alphaKey: M_ALPHA_KEYS.options[0], action: () => M_EndGame() },
   { patch: 'M_MESSG', label: 'Messages', alphaKey: M_ALPHA_KEYS.options[1], action: () => HU_ToggleMessages() },
-  { patch: 'M_DETAIL', label: 'Graphic Detail', alphaKey: M_ALPHA_KEYS.options[2], action: () => { _detailLevel ^= 1; } },
+  { patch: 'M_DETAIL', label: 'Graphic Detail', alphaKey: M_ALPHA_KEYS.options[2], action: () => M_ChangeDetail() },
   { patch: 'M_SCRNSZ', label: 'Screen Size', alphaKey: M_ALPHA_KEYS.options[3], slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
   { spacer: true, alphaKey: M_ALPHA_KEYS.options[4] },
   { patch: 'M_MSENS', label: 'Mouse Sensitivity', alphaKey: M_ALPHA_KEYS.options[5], slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
@@ -190,6 +192,7 @@ const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
 // m_menu.c:339-349 options_e — exact row indices. Each thermo sits on the
 // spacer row one line below its slider label, hence the `+ 1`.
 const opt_messages = 1, opt_detail = 2, opt_scrnsize = 3, opt_mousesens = 5;
+function M_ChangeDetail() { _detailLevel ^= 1; }
 // m_menu.c:951-966 M_DrawOptions — title, on/off + hi/lo indicators, thermos.
 OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
   const x = OPTIONS_MENU.x, y = OPTIONS_MENU.y, LH = LINE_HEIGHT;
@@ -419,7 +422,7 @@ export function M_Init() {
   _skullFrame = 0;
   _skullTicker = 0;
 }
-export function M_StartControlPanel() {
+export function M_StartControlPanel(playOpenSound = true) {
   if (menuactive) return;
   set_menuactive(true);
   // Continue is only meaningful when the user has started a game — i.e. a
@@ -437,10 +440,10 @@ export function M_StartControlPanel() {
   // memory (see pushMenu/popMenu) is kept only for back-out within an open panel.
   _selected = 0;
   // m_menu.c:1614 — opening the control panel plays sfx_swtchn. Placed here
-  // (rather than at each call site, as vanilla does) so every open path — ESC,
-  // a title-screen key, pointer-lock loss — gets it; callers must NOT also
-  // play swtchn themselves.
-  S_StartSound(null, sfx_swtchn);
+  // (rather than at each call site, as vanilla does) so every ordinary open
+  // path — ESC, a title-screen key, pointer-lock loss — gets it. F4 suppresses
+  // this until after SoundDef is installed to preserve its source call order.
+  if (playOpenSound === true) S_StartSound(null, sfx_swtchn);
 }
 export function M_ClearMenus() {
   set_menuactive(false);
@@ -482,6 +485,37 @@ export function M_Responder(ev) {
     M_SizeDisplay(key === KEY_MINUS ? 0 : 1);
     S_StartSound(null, sfx_stnmov);
     return true;
+  }
+  // m_menu.c:1549-1595 — retain the browser-supported closed-menu F-keys.
+  // F2/F3/F6/F9 remain intentionally absent with Save/Load/QuickSave/QuickLoad.
+  if (menuactive !== true) {
+    switch (M_ClosedShortcutRoute(key)) {
+      case 'sound':
+        // SoundDef's source parent is OptionsDef, and F4 always starts on
+        // sfx_vol. Install that state before the one switch-on sound.
+        M_StartControlPanel(false);
+        _currentMenu = SOUND_MENU;
+        _menuStack = [OPTIONS_MENU];
+        _selected = 0;
+        S_StartSound(null, sfx_swtchn);
+        return true;
+      case 'detail':
+        M_ChangeDetail();
+        S_StartSound(null, sfx_swtchn);
+        return true;
+      case 'endgame':
+        S_StartSound(null, sfx_swtchn);
+        M_EndGame();
+        return true;
+      case 'messages':
+        HU_ToggleMessages();
+        S_StartSound(null, sfx_swtchn);
+        return true;
+      case 'quit':
+        S_StartSound(null, sfx_swtchn);
+        M_QuitDOOM();
+        return true;
+    }
   }
   // m_menu.c:1597-1603 — F11 is a global shortcut while the menu is closed.
   // Re-uploading PLAYPAL resets the active damage/bonus palette just like the
