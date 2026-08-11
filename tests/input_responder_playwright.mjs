@@ -189,6 +189,9 @@ try {
     doomstat.set_gamestate(1 /*GS_INTERMISSION*/);
     doomstat.set_demoplayback(true);
     menu.M_ClearMenus();
+    lockedCanvas = canvas;
+    mouseMove(4, -6);
+    const demoMotion = sample();
     key('keydown', 'ControlLeft', 'Control');
     const demoKeyboard = sample();
     const demoKeyboardMenu = doomstat.menuactive;
@@ -199,6 +202,14 @@ try {
     const demoMouse = sample();
     const demoMouseMenu = doomstat.menuactive;
     canvas.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
+    menu.M_ClearMenus();
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 1, buttons: 4, bubbles: true, cancelable: true }));
+    const demoMiddleMenu = doomstat.menuactive;
+    canvas.dispatchEvent(new MouseEvent('mouseup', { button: 1, bubbles: true, cancelable: true }));
+    menu.M_ClearMenus();
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 2, buttons: 2, bubbles: true, cancelable: true }));
+    const demoRightMenu = doomstat.menuactive;
+    canvas.dispatchEvent(new MouseEvent('mouseup', { button: 2, bubbles: true, cancelable: true }));
 
     // Explicit -playdemo mode and queued game actions bypass the attract-menu
     // interception exactly as G_Responder's two guards require.
@@ -296,8 +307,11 @@ try {
       expectedFinalePause: events.BT_SPECIAL | events.BTS_PAUSE,
       demoKeyboard,
       demoKeyboardMenu,
+      demoMotion,
       demoMouse,
       demoMouseMenu,
+      demoMiddleMenu,
+      demoRightMenu,
       singleDemoInput,
       singleDemoMenu,
       queuedActionInput,
@@ -355,8 +369,15 @@ try {
   if (!zero(result.demoKeyboard) || result.demoKeyboardMenu !== true) {
     failures.push(`demo-intermission key leaked or missed menu: ${JSON.stringify(result.demoKeyboard)}`);
   }
+  if (result.demoMotion.forwardmove !== 6 || result.demoMotion.sidemove !== 0 ||
+      result.demoMotion.angleturn !== -32 || result.demoMotion.buttons !== 0) {
+    failures.push(`zero-button demo motion was swallowed: ${JSON.stringify(result.demoMotion)}`);
+  }
   if (!zero(result.demoMouse) || result.demoMouseMenu !== true) {
     failures.push(`demo-intermission mouse leaked or missed menu: ${JSON.stringify(result.demoMouse)}`);
+  }
+  if (result.demoMiddleMenu !== true || result.demoRightMenu !== true) {
+    failures.push(`non-primary demo mouse did not open menu: middle=${result.demoMiddleMenu}, right=${result.demoRightMenu}`);
   }
   if ((result.singleDemoInput.buttons & 1) === 0 || result.singleDemoMenu !== false) {
     failures.push(`singledemo input was intercepted: ${JSON.stringify(result.singleDemoInput)}`);

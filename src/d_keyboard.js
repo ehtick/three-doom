@@ -171,7 +171,8 @@ function onKeyUp(e) { keys.delete(e.code); }
 
 function onMouseDown(e) {
     // g_game.c's demo interception consumes mouse-button presses before they
-    // can alter gameplay state. i_video opens the menu on the matching click.
+    // can alter gameplay state. i_video opens the menu on this same mousedown
+    // so middle/right buttons work as well as the primary button.
     if (demoInputIsIntercepted()) {
       e.preventDefault?.();
       return;
@@ -203,7 +204,11 @@ function onMouseDown(e) {
 function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
 
 function onMouseMove(e) {
-    if (doomstat.menuactive !== true && demoInputIsIntercepted() !== true &&
+    // Attract/demo interception applies only to ev_mouse events whose button
+    // mask is nonzero.  Zero-button motion still updates the local axes; the
+    // tic loop drains those axes before replacing the command from the demo.
+    const demoButtonPress = demoInputIsIntercepted() === true && (e.buttons | 0) !== 0;
+    if (doomstat.menuactive !== true && demoButtonPress !== true &&
         renderer !== null && document.pointerLockElement === renderer.domElement) {
       // g_game.c:G_Responder applies sensitivity before G_BuildTiccmd consumes
       // the axes. Preserve that per-event truncation while accumulating the

@@ -19,6 +19,21 @@ Deno.test('demo input interception is state-independent and precedes gameplay ca
   if (mouseGuard < 0 || mouseGuard > mouse.indexOf('mouseButtons |=')) {
     throw new Error('demo mouse button reaches gameplay state before interception');
   }
+  const move = keyboard.slice(
+    keyboard.indexOf('function onMouseMove'),
+    keyboard.indexOf('function resetLevelInput'),
+  );
+  if (!move.includes('(e.buttons | 0) !== 0')) {
+    throw new Error('demo interception still swallows zero-button mouse motion');
+  }
+  const videoMouse = video.slice(
+    video.indexOf('function onMouseDown'),
+    video.indexOf('function onMouseUp'),
+  );
+  if (!videoMouse.includes('M_StartControlPanel()') ||
+      videoMouse.indexOf('M_StartControlPanel()') > videoMouse.indexOf('return;')) {
+    throw new Error('demo mouse button does not open the menu on mousedown');
+  }
   const click = video.slice(
     video.indexOf('function onRendererClick'),
     video.indexOf('function onDoomQuit'),
@@ -26,5 +41,8 @@ Deno.test('demo input interception is state-independent and precedes gameplay ca
   if (!click.includes('demoInputIsIntercepted()') ||
       click.indexOf('demoInputIsIntercepted()') > click.indexOf('GS_INTERMISSION')) {
     throw new Error('renderer click handles non-level state before demo interception');
+  }
+  if (!click.includes('_suppressRendererClick')) {
+    throw new Error('the primary opening click can act on the new menu twice');
   }
 });

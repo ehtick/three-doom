@@ -53,6 +53,10 @@ import('./doomstat.js').then((d) => { if (_shuttingDown === false) _doomstat = d
 
 let _onPointerLockChange = null;
 let _rendererClickTarget = null;
+// A primary press that opens the attract/demo menu is followed by a browser
+// `click`.  Suppress only that matching click so it cannot immediately act on
+// the newly-opened menu; later clicks remain available to M_HandleTap.
+let _suppressRendererClick = false;
 let _shutdownPromise = null;
 let _shuttingDown = false;
 const _shutdownHooks = new Set();
@@ -74,6 +78,10 @@ export function I_RegisterGraphicsShutdownHook(hook) {
 
 function onRendererClick(e) {
   if (_shuttingDown === true || renderer === null || _doomstat === null) return;
+  if (_suppressRendererClick === true && e.button === 0) {
+    _suppressRendererClick = false;
+    return;
+  }
   // Menu open → route the tap into the menu, before the level pointer-lock
   // grab below so it isn't swallowed into recapturing the mouse.
   if (_doomstat.menuactive === true && _mMenu !== null && overlayCanvas !== null) {
@@ -248,6 +256,7 @@ export function I_ShutdownGraphics() {
   // clear that UI state so quitting cannot leave doomstat.menuactive latched.
   try { _mMenu?.M_ClearMenus(); } catch (error) { cleanupErrors.push(error); }
   mouseButtons = 0;
+  _suppressRendererClick = false;
 
   _shutdownPromise = (async () => {
     let disposedLevelObjects = 0;
@@ -475,13 +484,27 @@ function onKeyUp(e) {
 
 let mouseButtons = 0;
 function onMouseMove(e) {
-  if (demoInputIsIntercepted()) return;
+  // g_game.c:G_Responder intercepts demo mouse events only when their button
+  // mask is nonzero.  Plain motion must still reach the local input state so
+  // G_BuildTiccmd can drain it even though the demo command later replaces it.
+  if (demoInputIsIntercepted() && mouseButtons !== 0) return;
   if (document.pointerLockElement !== renderer?.domElement) return;
   // Doom expects ev_mouse with x/y deltas. movementX/movementY are in CSS pixels.
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: e.movementX | 0, data3: -e.movementY | 0 });
 }
 function onMouseDown(e) {
+  // Clear a stale suppression (for example, a drag that emitted no click).
+  // A demo-opening primary press below immediately arms it again.
+  if (e.button === 0) _suppressRendererClick = false;
   if (demoInputIsIntercepted()) {
+    mouseButtons |= (1 << e.button);
+    // Open on mousedown, not the primary-only click event: vanilla accepts any
+    // nonzero mouse-button mask, including middle and right.  d_keyboard has
+    // already declined to mutate gameplay state before this window handler.
+    if (_doomstat?.menuactive !== true && _mMenu !== null) {
+      _mMenu.M_StartControlPanel();
+      if (e.button === 0) _suppressRendererClick = true;
+    }
     e.preventDefault?.();
     return;
   }
