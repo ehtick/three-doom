@@ -767,6 +767,7 @@ export async function D_DoomMain() {
   // P_SpawnSpecials moved into loadLevel — it needs sectors[] loaded first.
   // st_stuff palette flashes.
   const stStuff = await import('./st_stuff.js');
+  const huStuff = await import('./hu_stuff.js');
   const iv = await import('./i_video.js');
   stStuff.ST_SetExternals({ I_SetPaletteIndex: iv.I_SetPaletteIndex });
 
@@ -812,7 +813,13 @@ export async function D_DoomMain() {
     if (ds.deathmatch !== 0) {
       for (let i = 0; i < p.cards.length; i++) p.cards[i] = true;
     }
-    // ST_Start/HU_Start are local UI setup and remain active across respawns.
+    // p_mobj.c:693-699 — spawning the console player immediately wakes both
+    // local UI modules. Waiting for their first ticker leaves the first rendered
+    // frame with stale face/title state and differs from the synchronous C path.
+    if (mt.type - 1 === doomstat.consoleplayer) {
+      stStuff.ST_Start();
+      huStuff.HU_Start();
+    }
   };
   // g_game.c:843 — full initial/respawn spot check, including the corpse queue
   // and teleport fog that consumes the RNG value immediately before the new mo.
