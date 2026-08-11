@@ -8,6 +8,7 @@ import {
   gameepisode, gamemode, gamemap,
   players,
   set_automapactive, set_gameaction, set_gamestate, set_viewactive,
+  set_wipegamestate,
 } from './doomstat.js';
 import { GameMode_t, gamestate_t } from './doomdef.js';
 import { gameaction_t } from './d_event.js';
@@ -102,6 +103,9 @@ export function F_Ticker() {
   if (_stage === 0 && _finalecount > F_TEXTWAIT + _finaleText.length * F_TEXTSPEED) {
     _stage = 1;
     _finalecount = 0;
+    // f_finale.c:245 — stage changes do not change gamestate, so explicitly
+    // invalidate D_Display's remembered state to melt text into the art page.
+    set_wipegamestate(-1);
     // f_finale.c:247 — the E3 bunny scroller gets its own track.
     if (gameepisode === 3) S_StartMusic(mus_bunny);
   }
@@ -217,6 +221,9 @@ let _cast = null;
 let _castActive = false;
 
 export function F_StartCast() {
+  // f_finale.c:F_StartCast forces a wipe even though both screens are
+  // GS_FINALE (MAP30 text -> cast call).
+  set_wipegamestate(-1);
   _castActive = true;
   _cast = F_CreateCastState();
   S_ChangeMusic(mus_evil, true);

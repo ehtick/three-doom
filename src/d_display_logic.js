@@ -5,6 +5,13 @@ import { SCREENWIDTH } from './doomdef.js';
 
 const PAUSE_CENTERING_WIDTH = 68;
 
+// d_main.c:D_Display starts a wipe whenever the requested state differs from
+// wipegamestate.  A browser wipe spans RAFs, so do not replace an in-flight
+// melt with another capture; vanilla's blocking wipe cannot be re-entered.
+export function D_ShouldStartWipe(gamestate, wipegamestate, wipeActive) {
+  return wipeActive !== true && gamestate !== wipegamestate;
+}
+
 // d_main.c:303-310. M_PAUSE itself is 69 pixels wide in the stock IWAD, but
 // vanilla deliberately centers with the literal 68 and integer division.
 export function D_PausePatchPosition(

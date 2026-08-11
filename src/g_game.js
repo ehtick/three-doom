@@ -231,6 +231,11 @@ export function G_DoReborn(playernum) {
 }
 
 export function G_DoLoadLevel() {
+  // g_game.c:472-473 — restarting while already displaying a level still
+  // melts from the old map into the freshly loaded one.
+  if (doomstat.wipegamestate === gamestate_t.GS_LEVEL) {
+    doomstat.set_wipegamestate(-1);
+  }
   set_gamestate(gamestate_t.GS_LEVEL);
   // g_game.c:470 — `levelstarttic = gametic` for par-time math.
   set_levelstarttic(gametic);

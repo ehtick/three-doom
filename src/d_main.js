@@ -42,7 +42,7 @@ import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 import { D_AccumulateTics } from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
-import { D_PausePatchPosition } from './d_display_logic.js';
+import { D_PausePatchPosition, D_ShouldStartWipe } from './d_display_logic.js';
 import { R_CalculateCanvasView, R_GetViewSize } from './r_view.js';
 import { R_DrawViewBorder } from './r_border.js';
 import {
@@ -181,8 +181,17 @@ function D_DrawPausePatch(overlayCtx) {
 }
 
 function D_Display() {
+  // d_main.c:223-230 — capture the last fully composed frame before drawing
+  // the new state.  f_wipe retains that frame because WebGL's drawing buffer
+  // is not preserved between browser composites.
+  const wipeWasActive = _fwipeActive !== null && _fwipeActive();
+  const startWipe = _fwipeStart !== null && _fwipeEnd !== null &&
+    D_ShouldStartWipe(gamestate, doomstat.wipegamestate, wipeWasActive);
+  if (startWipe) _fwipeStart(0, 0, SCREENWIDTH, SCREENHEIGHT);
+
   // d_main.c:273-275 — leaving the level restores PLAYPAL 0. Otherwise a
   // last-tic damage/bonus/radsuit palette can leak into intermission/finale.
+  // Keep this after StartScreen to preserve the reference capture order.
   if (gamestate !== _oldDisplayGameState && gamestate !== gamestate_t.GS_LEVEL) {
     I_SetPaletteIndex(0);
   }
@@ -216,16 +225,6 @@ function D_Display() {
     const overlay = _overlayCanvas;
     o.clearRect(0, 0, overlay.width, overlay.height);
     o.imageSmoothingEnabled = false;
-    // Screen wipe takes priority — paint melt frames, skip the normal HUD.
-    if (_fwipeActive !== null && _fwipeActive()) {
-      const cw = overlay.width, ch = overlay.height;
-      const scale = Math.min(cw / 320, ch / 200);
-      const dw = 320 * scale, dh = 200 * scale;
-      const dx = (cw - dw) * 0.5;
-      const dy = (ch - dh) * 0.5;
-      if (_fwipeDraw !== null) _fwipeDraw(o, dx, dy, dw, dh);
-      return;
-    }
     if (_drawPlayerSprites !== null && p !== undefined && p !== null) {
       const cw = overlay.width, ch = overlay.height;
       const view = R_GetViewSize();
@@ -283,6 +282,12 @@ function D_Display() {
     I_FinishUpdate();
   }
 
+  // d_main.c records the displayed state before pause/menu composition. A
+  // forced -1 written by the finale is therefore consumed by this draw too.
+  if (wipeWasActive !== true || startWipe) {
+    doomstat.set_wipegamestate(gamestate);
+  }
+
   // d_main.c:D_Display draws M_PAUSE after every game-state drawer, then
   // draws the menu on top of it. Keeping both here also makes that ordering
   // identical for levels, intermissions, finales, and demo/title pages.
@@ -291,6 +296,47 @@ function D_Display() {
   D_DrawPausePatch(overlay);
   if (_menuDrawer !== null) {
     _menuDrawer(overlay, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
+  }
+
+  // Capture the complete destination (including pause/menu), then advance and
+  // draw the melt.  M_Drawer is repeated over each wipe frame in d_main.c so
+  // an open menu remains stationary while the captured screens melt below it.
+  if (startWipe) {
+    _fwipeEnd(0, 0, SCREENWIDTH, SCREENHEIGHT);
+    _wipeLastTime = I_GetTime() - 1;
+  }
+  const advanceWipe = _fwipeActive !== null && _fwipeActive();
+  if (advanceWipe) {
+    const now = I_GetTime();
+    const tics = Math.max(0, now - _wipeLastTime);
+    if (tics > 0 && _fwipeStep !== null) {
+      _fwipeStep(0, 0, 0, SCREENWIDTH, SCREENHEIGHT, tics);
+      _wipeLastTime = now;
+    }
+    const cw = _overlayCanvas.width, ch = _overlayCanvas.height;
+    if (_fwipeDraw !== null) {
+      // The retained wipe is Doom's canonical 320x200 screen. Present it only
+      // inside the centered logical-screen rectangle so browser letterbox
+      // bars are neither resampled into melt columns nor overwritten.
+      const layout = R_CalculateCanvasView(cw, ch);
+      _fwipeDraw(
+        overlay,
+        layout.screenX,
+        layout.screenY,
+        layout.screenWidth,
+        layout.screenHeight,
+      );
+    }
+    if (_menuDrawer !== null) {
+      _menuDrawer(overlay, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
+    }
+  }
+
+  // Preserve the last fully presented composed frame for the next
+  // wipe_StartScreen.  Record the final all-destination wipe frame too.
+  if (_fwipeActive === null || _fwipeActive() !== true) {
+    _wipeLastTime = -1;
+    if (_fwipeRecord !== null) _fwipeRecord();
   }
 }
 
@@ -312,6 +358,10 @@ let _menuDrawer = null;
 let _fwipeDraw = null;
 let _fwipeActive = null;
 let _fwipeStep = null;
+let _fwipeStart = null;
+let _fwipeEnd = null;
+let _fwipeRecord = null;
+let _wipeLastTime = -1;
 let _gTicker = null;
 let _gCheckSpecial = null;
 let _huTicker = null;
@@ -361,6 +411,10 @@ function D_ClearLoopReferences() {
   _fwipeDraw = null;
   _fwipeActive = null;
   _fwipeStep = null;
+  _fwipeStart = null;
+  _fwipeEnd = null;
+  _fwipeRecord = null;
+  _wipeLastTime = -1;
   _gTicker = null;
   _gCheckSpecial = null;
   _gPlayDemo = null;
@@ -410,6 +464,9 @@ async function D_DoomLoop() {
   _fwipeDraw   = fw.wipe_Draw;
   _fwipeActive = fw.wipe_isActive;
   _fwipeStep   = fw.wipe_ScreenWipe;
+  _fwipeStart  = fw.wipe_StartScreen;
+  _fwipeEnd    = fw.wipe_EndScreen;
+  _fwipeRecord = fw.wipe_RecordScreen;
   const gMod = await import('./g_game.js');
   _gTicker      = gMod.G_Ticker;
   _gCheckSpecial = gMod.G_CheckSpecialButtons;
@@ -483,10 +540,6 @@ async function D_DoomLoop() {
         }
       }
 
-      // Advance wipe even while in level transition.
-      if (_fwipeStep !== null && _fwipeActive !== null && _fwipeActive()) {
-        _fwipeStep(0, 0, 0, 320, 200, 1);
-      }
       if (gamestate === gamestate_t.GS_LEVEL && _pTicker !== null) {
         const p = players[consoleplayer];
         // Wait until synchronous loadLevel has spawned the complete topology.
