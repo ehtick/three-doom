@@ -373,18 +373,19 @@ export function G_DoPlayDemo() {
   const skill   = _demoBytes[_demoPos++];
   const episode = _demoBytes[_demoPos++];
   const map     = _demoBytes[_demoPos++];
-  _demoPos++; // deathmatch
-  _demoPos++; // respawnparm
-  _demoPos++; // fastparm
-  _demoPos++; // nomonsters
-  _demoPos++; // consoleplayer
-  _demoPos += 4; // playeringame[0..3]
+  doomstat.set_deathmatch(_demoBytes[_demoPos++]);
+  doomstat.set_respawnparm(_demoBytes[_demoPos++] !== 0);
+  doomstat.set_fastparm(_demoBytes[_demoPos++] !== 0);
+  doomstat.set_nomonsters(_demoBytes[_demoPos++] !== 0);
+  doomstat.set_consoleplayer(_demoBytes[_demoPos++]);
+  for (let i = 0; i < MAXPLAYERS; i++) {
+    playeringame[i] = _demoBytes[_demoPos++] !== 0;
+  }
+  doomstat.set_netgame(playeringame[1] === true);
   G_InitNew(skill, episode, map);
-  doomstat.set_demoplayback(true);
-  // Match C g_game.c::G_DoPlayDemo — G_InitNew ends with G_DoLoadLevel, so
-  // gamestate flips to GS_LEVEL synchronously, stopping D_PageTicker from
-  // racing the next-tic advancedemo and clobbering the queued level load.
   G_DoLoadLevel();
+  doomstat.set_usergame(false);
+  doomstat.set_demoplayback(true);
 }
 
 export function G_ReadDemoTiccmd(cmd) {
@@ -426,13 +427,17 @@ export function G_SetDemoEndCallback(fn) { _onDemoEnd = fn; }
 // via G_StopDemo(). Mirrors vanilla g_game.c::G_WriteDemoTiccmd.
 let _recordBuf = null, _recordName = '';
 export function G_RecordDemo(name) {
+  doomstat.set_usergame(false);
+  doomstat.set_demorecording(true);
   _recordName = name;
   _recordBuf = [];
-  // Header: vmajor, vminor (Doom v1.9 = 109), skill, ep, map, dm, respawn,
-  // fast, nomonsters, consoleplayer, players[0..3] active.
-  _recordBuf.push(109, gameskill, gameepisode, gamemap,
-                  0 /*deathmatch*/, 0 /*respawnparm*/, 0 /*fastparm*/, 0 /*nomonsters*/, 0 /*consoleplayer*/);
-  for (let i = 0; i < 4; i++) _recordBuf.push(i === 0 ? 1 : 0);
+  _recordBuf.push(DEMO_VERSION, gameskill, gameepisode, gamemap,
+                  doomstat.deathmatch,
+                  doomstat.respawnparm ? 1 : 0,
+                  doomstat.fastparm ? 1 : 0,
+                  doomstat.nomonsters ? 1 : 0,
+                  consoleplayer);
+  for (let i = 0; i < MAXPLAYERS; i++) _recordBuf.push(playeringame[i] ? 1 : 0);
 }
 export function G_WriteDemoTiccmd(cmd) {
   if (_recordBuf === null) return;
@@ -449,6 +454,7 @@ export function G_StopDemo() {
   _recordBuf.push(0x80 /*DEMOMARKER*/);
   const out = new Uint8Array(_recordBuf);
   _recordBuf = null;
+  doomstat.set_demorecording(false);
   return { name: _recordName, bytes: out };
 }
 
