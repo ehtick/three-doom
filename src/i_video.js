@@ -19,6 +19,15 @@ export let renderer = null;
 export let scene    = null;
 export let camera   = null;
 
+// Vanilla sets `projection = centerx`, so the left and right view rays are
+// always 45 degrees from the optical axis: a 90-degree horizontal FOV.
+// THREE.PerspectiveCamera.fov is vertical, so derive it from the live aspect.
+const DOOM_HORIZONTAL_FOV = 90;
+function doomVerticalFov(aspect) {
+  const halfHorizontal = THREE.MathUtils.degToRad(DOOM_HORIZONTAL_FOV * 0.5);
+  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(halfHorizontal) / aspect));
+}
+
 // 2D overlay
 let overlayCanvas = null;
 let overlayCtx    = null;
@@ -53,8 +62,9 @@ export function I_InitGraphics() {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
 
-  scene  = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 1, 16384);
+  scene = new THREE.Scene();
+  const aspect = window.innerWidth / window.innerHeight;
+  camera = new THREE.PerspectiveCamera(doomVerticalFov(aspect), aspect, 1, 16384);
 
   // 2D overlay
   overlayCanvas = document.getElementById('overlay');
@@ -174,7 +184,11 @@ function resize() {
   overlayCanvas.width  = w;
   overlayCanvas.height = h;
   if (renderer) { renderer.setSize(w, h); }
-  if (camera)   { camera.aspect = w / h; camera.updateProjectionMatrix(); }
+  if (camera) {
+    camera.aspect = w / h;
+    camera.fov = doomVerticalFov(camera.aspect);
+    camera.updateProjectionMatrix();
+  }
 }
 
 // ---------- Palette ----------
