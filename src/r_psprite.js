@@ -21,6 +21,7 @@ import {
   SPRITE_SHADOW_FLICKER,
   SPRITE_SHADOW_OPACITY,
 } from './r_sprite_logic.js';
+import { R_DrawPspritePatch, R_PspritePatchBounds } from './r_psprite_projection.js';
 
 // Cache source indices and one remapped Canvas per COLORMAP row. Each Canvas
 // still resolves those remapped indices through the active PLAYPAL lazily.
@@ -124,19 +125,22 @@ export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH) 
       player.extralight,
     );
     const t = R_CreatePspriteCanvasInfo(source, colormapRow);
-    // Ported from r_pspr.c:
-    //   x1 = centerx + psp.sx - 160 - leftoffset  →  psp.sx - leftoffset (in pixels)
-    //   patch_top_y = psp.sy - topoffset
-    const patchX = (psp.sx >> 16) - t.leftoffset;
-    const patchY = (psp.sy >> 16) - t.topoffset;
+    // R_DrawPSprite computes its patch bounds before inspecting flip. The
+    // flipped branch only reverses startfrac/xiscale, so both orientations
+    // retain the exact same spriteoffset/spritetopoffset rectangle.
+    const bounds = R_PspritePatchBounds(psp.sx, psp.sy, t);
     const previousAlpha = overlayCtx.globalAlpha;
     if (colormapRow === PSPRITE_SHADOW_ROW) overlayCtx.globalAlpha = shadowOpacity;
     try {
-      overlayCtx.drawImage(
+      R_DrawPspritePatch(
+        overlayCtx,
         t.canvas,
-        0, 0, t.w, t.h,
-        dstX + patchX * sx, dstY + patchY * sy,
-        t.w * sx, t.h * sy
+        bounds,
+        dstX,
+        dstY,
+        sx,
+        sy,
+        sf.flip[0] === 1,
       );
     } finally {
       overlayCtx.globalAlpha = previousAlpha;
