@@ -36,6 +36,7 @@ try {
     const doomstat = await import('/src/doomstat.js');
     const automap = await import('/src/am_map.js');
     const calls = [];
+    const automapRects = [];
     const proto = CanvasRenderingContext2D.prototype;
     const originalDrawImage = proto.drawImage;
     const originalFillRect = proto.fillRect;
@@ -48,7 +49,10 @@ try {
     };
     proto.fillRect = function (...args) {
       const stack = new Error().stack ?? '';
-      if (stack.includes('/src/am_map')) calls.push('automap');
+      if (stack.includes('/src/am_map')) {
+        calls.push('automap');
+        automapRects.push(args.slice(0, 4));
+      }
       return originalFillRect.apply(this, args);
     };
 
@@ -59,12 +63,14 @@ try {
 
       automap.AM_Start();
       calls.length = 0;
+      automapRects.length = 0;
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const automapCalls = [...calls];
       const automapResult = {
         active: doomstat.automapactive,
         normalCalls,
         automapCalls,
+        automapRect: automapRects.at(-1),
       };
       automap.AM_Stop();
 
@@ -145,6 +151,9 @@ try {
   if (!result.active) failures.push('automap was not active during the sampled frame');
   if (normalPsprite < 0) failures.push('control frame did not draw a weapon psprite');
   if (map < 0) failures.push('automap frame did not draw the automap');
+  if (JSON.stringify(result.automapRect) !== JSON.stringify([0, 0, 960, 504])) {
+    failures.push(`automap did not use the logical 320x168 window: ${JSON.stringify(result.automapRect)}`);
+  }
   if (mapPsprite >= 0) failures.push('automap frame drew a weapon psprite');
   if (hud <= map) failures.push('HUD did not remain after the automap');
   if (status <= hud) failures.push('status bar did not remain after the HUD');

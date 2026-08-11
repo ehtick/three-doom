@@ -189,16 +189,22 @@ function D_Display() {
     I_FinishUpdate(); // paints TITLEPIC to the same overlay canvas
   } else if (gamestate === gamestate_t.GS_LEVEL) {
     const p = players[consoleplayer];
-    if (p !== undefined && p !== null && p.mo !== null) {
-      R_SetupFrame(p);
-    } else {
-      D_FreeCamera.update();
-    }
-    // Sync sprite billboards + sky to current view.
-    if (_updateSprites !== null) _updateSprites();
-    if (_updateSky !== null) _updateSky();
-    if (renderer !== null) {
-      renderer.render(scene, camera);
+    // d_main.c calls R_RenderPlayerView only while viewactive; reference
+    // AM_Start clears that flag. Mirror the same gate from our authoritative
+    // automap binding so no first-person setup reveals the current subsector,
+    // updates view sprites/sky, or submits WebGL rendering.
+    if (doomstat.automapactive !== true) {
+      if (p !== undefined && p !== null && p.mo !== null) {
+        R_SetupFrame(p);
+      } else {
+        D_FreeCamera.update();
+      }
+      // Sync sprite billboards + sky to the current first-person view.
+      if (_updateSprites !== null) _updateSprites();
+      if (_updateSky !== null) _updateSky();
+      if (renderer !== null) {
+        renderer.render(scene, camera);
+      }
     }
     // Overlay: weapon view-sprite (HUD/status to come).
     const o = getOverlay();
@@ -221,9 +227,9 @@ function D_Display() {
       const dw = 320 * scale, dh = 200 * scale;
       const dx = (cw - dw) * 0.5;
       const dy = (ch - dh) * 0.5;
-      // Automap covers the whole overlay (not letterboxed) — Doom drew it
-      // over the entire view-area; we mirror that by painting full-canvas.
-      if (_amDrawer !== null) _amDrawer(o, 0, 0, overlay.width, overlay.height);
+      // am_map.c uses the top 320x168 framebuffer; the status bar owns the
+      // bottom 32 pixels of the centered/scaled logical 320x200 screen.
+      if (_amDrawer !== null) _amDrawer(o, dx, dy, dw, 168 * scale);
       // d_main.c:D_Display only calls R_RenderPlayerView when the automap is
       // closed. R_DrawPlayerSprites lives inside that render path, so weapon
       // and muzzle-flash psprites must not be composited over the automap.
@@ -237,8 +243,8 @@ function D_Display() {
       // 320x200 viewport). ST_Drawer expects a 320x200-relative box and draws
       // the bar at y=168..200 inside it; we pick a virtual box such that the
       // bar lands flush at the bottom of the actual canvas.
-      // Status bar — hidden when screen-size slider is at max (screenblocks
-      // === 11), matching vanilla. Other sizes always show the bar.
+      // The fullscreen first-person size hides STBAR, but vanilla forces it
+      // back on whenever automapactive is true.
       if (_stDrawer !== null && (_isStatusBarVisible === null || _isStatusBarVisible() === true)) {
         const cw = overlay.width;
         const barScale = cw / 320;

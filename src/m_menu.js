@@ -78,7 +78,11 @@ let _screenSize   = 6;
 let _screenblocks = 9;
 
 export function getScreenblocks() { return _screenblocks; }
-export function isStatusBarVisible() { return _screenblocks < 11; }
+// st_stuff.c:1111 — automap always restores the status bar even when the
+// first-person view-size slider is at fullscreen (screenblocks == 11).
+export function isStatusBarVisible() {
+  return _screenblocks < 11 || automapactive === true;
+}
 
 // Save-slot names.
 const SAVE_SLOTS = 6;
@@ -579,7 +583,8 @@ function drawMessage(ctx, dstX, dstY, dstW, dstH) {
 // m_menu.c:1152 — M_SizeDisplay. Slider LEFT (choice=0) shrinks the view
 // (decrement screenSize/screenblocks); RIGHT (choice=1) grows it. The
 // vanilla bounds are screenSize in [0,8] mapping to screenblocks in [3,11].
-// Once we reach the top, screenblocks=11 hides the status bar.
+// Once we reach the top, screenblocks=11 hides the bar in first-person view;
+// an active automap still forces it on in ST_Ticker/ST_Drawer.
 export function M_SizeDisplay(choice) {
   if (choice === 0) {
     if (_screenSize > 0) {

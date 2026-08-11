@@ -6,6 +6,9 @@
 
 import { renderer, I_RegisterGraphicsShutdownHook, I_TranslateKey } from './i_video.js';
 import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT, evtype_t } from './d_event.js';
+import { KEY_EQUALS } from './doomdef.js';
+import { AM_Responder } from './am_map.js';
+import { cht_HandleKey } from './m_cheat.js';
 import {
   D_ComputeMovement,
   D_MouseStrafePressed,
@@ -98,6 +101,7 @@ async function onKeyDown(e) {
           return;
         }
       }
+      const wasHeld = keys.has(e.code);
       keys.add(e.code);
       // g_game.c:G_Responder handles KEY_PAUSE without a gamestate guard once
       // attract/demo input has been intercepted above. The next complete
@@ -128,46 +132,45 @@ async function onKeyDown(e) {
       // must reach it, including F/M/C that automap may also consume.
       if (e.code.startsWith('Key')) {
         const ch = e.code.charAt(3).toLowerCase().charCodeAt(0);
-        const cheat = await import('./m_cheat.js');
-        if (listenerIsActive(generation) !== true) return;
-        cheat.cht_HandleKey(ch);
+        cht_HandleKey(ch);
       } else if (e.code.startsWith('Digit')) {
         // Vanilla ST_Responder feeds digits too (e.g. IDMUS parameters).
         const digCh = e.code.slice(5).charCodeAt(0); // '0'..'9'
-        const cheat = await import('./m_cheat.js');
-        if (listenerIsActive(generation) !== true) return;
-        cheat.cht_HandleKey(digCh);
+        cht_HandleKey(digCh);
       }
 
-      // Single-shot automap controls. Only Tab starts a closed automap;
-      // zoom/follow/mark/clear belong exclusively to an active automap.
-      if (e.code === 'Tab') {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: evtype_t.ev_keydown, data1: 9 });
-      } else if (doomstat.automapactive === true &&
-                 (e.code === 'Equal' || e.code === 'NumpadAdd')) {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: 0, data1: 0x2b });
-      } else if (doomstat.automapactive === true &&
-                 (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: 0, data1: 0x2d });
-      } else if (doomstat.automapactive === true &&
-                 (e.code === 'KeyF' || e.code === 'KeyM' || e.code === 'KeyC')) {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        const key = e.code === 'KeyF' ? 0x66 : e.code === 'KeyM' ? 0x6d : 0x63;
-        am.AM_Responder({ type: evtype_t.ev_keydown, data1: key });
+      // st_stuff.c's cheat responder above precedes AM_Responder, which in
+      // turn precedes gamekeydown. Offer every level key to the automap so its
+      // arrow ownership can depend on follow mode and held controls receive
+      // matching keyups. Browser Equal/NumpadAdd both represent Doom's '='.
+      if (doomstat.gamestate === 0 /*GS_LEVEL*/) {
+        const mapKey = (e.code === 'Equal' || e.code === 'NumpadAdd')
+          ? KEY_EQUALS
+          : doomKey;
+        if (AM_Responder({ type: evtype_t.ev_keydown, data1: mapKey }) === true) {
+          // A newly captured automap press never reaches gamekeydown. An
+          // auto-repeat of a key that previously filtered through must leave
+          // that older held gameplay state intact until the real keyup.
+          if (wasHeld !== true) keys.delete(e.code);
+          e.preventDefault?.();
+          return;
+        }
       }
 }
 
 // Vanilla lets keyups fall through M_Responder to G_Responder. Always clear a
 // release, even while the menu is active, so pre-menu movement cannot stick in
 // a live netgame.
-function onKeyUp(e) { keys.delete(e.code); }
+function onKeyUp(e) {
+  if (doomstat.gamestate === 0 /*GS_LEVEL*/) {
+    const doomKey = I_TranslateKey(e);
+    const mapKey = (e.code === 'Equal' || e.code === 'NumpadAdd')
+      ? KEY_EQUALS
+      : doomKey;
+    AM_Responder({ type: evtype_t.ev_keyup, data1: mapKey });
+  }
+  keys.delete(e.code);
+}
 
 function onMouseDown(e) {
     // g_game.c's demo interception consumes mouse-button presses before they

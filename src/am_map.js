@@ -3,21 +3,36 @@
 // per-linedef colors (am_map.c:AM_drawWalls), pan/zoom via +/-, follow toggle
 // via 'f', Tab to open/close, mark placement via 'm', and mark clear via 'c'.
 
-import { lines, numlines } from './p_setup.js';
 import {
-  players, consoleplayer, automapactive, set_automapactive,
+  bmaporgx, bmaporgy, lines, numlines, vertexes,
+} from './p_setup.js';
+import {
+  players, playeringame, consoleplayer, automapactive, set_automapactive,
+  gameepisode, gamemap,
 } from './doomstat.js';
 import { ML_DONTDRAW, ML_SECRET, ML_MAPPED } from './doomdata.js';
+import { KEY_TAB } from './doomdef.js';
+import { evtype_t } from './d_event.js';
+import { FRACUNIT } from './m_fixed.js';
 import { V_PaletteCSS } from './v_palette.js';
+import {
+  AMSTR_FOLLOWON, AMSTR_FOLLOWOFF, AMSTR_GRIDON, AMSTR_GRIDOFF,
+  AMSTR_MARKEDSPOT, AMSTR_MARKSCLEARED,
+} from './d_englsh.js';
+import {
+  AM_ApplyControlEvent, AM_CreateViewState, AM_FRAME_HEIGHT, AM_FRAME_WIDTH,
+  AM_OpenView, AM_ProjectFixedPoint, AM_TickViewState,
+} from './am_map_logic.js';
 
 // automapactive is a single engine-wide global in vanilla. Re-export the
 // doomstat live binding so finale/level transitions and AM_* always mutate
 // and observe the same state.
 export { automapactive, set_automapactive } from './doomstat.js';
 
-let _viewX = 0, _viewY = 0;
-let _scale = 0.25;
-let _followMode = true;
+let _viewState = AM_CreateViewState(null, null);
+let _lastLevel = -1;
+let _lastEpisode = -1;
+let _stopped = true;
 
 // am_map.c color classes (AM_drawWalls): one-sided walls are red, teleporter
 // lines mid-red, floor-height changes brown, ceiling-height changes yellow.
@@ -44,85 +59,126 @@ export function AM_clearMarks() {
 
 // am_map.c:377 — AM_addMark drops a marker at the automap view center.
 export function AM_addMark() {
-  _markpoints[_markpointnum].x = _viewX;
-  _markpoints[_markpointnum].y = _viewY;
+  _markpoints[_markpointnum].x = _viewState.mX + Math.trunc(_viewState.mW / 2);
+  _markpoints[_markpointnum].y = _viewState.mY + Math.trunc(_viewState.mH / 2);
   _markpointnum = (_markpointnum + 1) % AM_NUMMARKPOINTS;
 }
 
-export function AM_Start() {
-  set_automapactive(true);
-  const p = players[consoleplayer];
-  if (p !== undefined && p !== null && p.mo !== null) {
-    _viewX = p.mo.x / 65536;
-    _viewY = p.mo.y / 65536;
+function mapPlayer() {
+  let pnum = consoleplayer;
+  if (playeringame[pnum] !== true) {
+    pnum = playeringame.findIndex((active) => active === true);
   }
+  return pnum >= 0 ? players[pnum] : null;
 }
 
-export function AM_Stop() { set_automapactive(false); }
+export function AM_Start() {
+  if (_stopped !== true) AM_Stop();
+  _stopped = false;
+  const player = mapPlayer();
+  const mo = player?.mo ?? null;
+  if (_lastLevel !== gamemap || _lastEpisode !== gameepisode ||
+      (_viewState.hasBounds !== true && Array.isArray(vertexes))) {
+    _viewState = AM_CreateViewState(vertexes, mo, _viewState);
+    AM_clearMarks();
+    _lastLevel = gamemap;
+    _lastEpisode = gameepisode;
+  } else {
+    _viewState = AM_OpenView(_viewState, mo);
+  }
+  set_automapactive(true);
+}
+
+export function AM_Stop() {
+  set_automapactive(false);
+  _stopped = true;
+}
 export function AM_Toggle() { if (automapactive) AM_Stop(); else AM_Start(); }
 
 export function AM_Ticker() {
   if (!automapactive) return;
-  if (_followMode) {
-    const p = players[consoleplayer];
-    if (p !== undefined && p !== null && p.mo !== null) {
-      _viewX = p.mo.x / 65536;
-      _viewY = p.mo.y / 65536;
-    }
-  }
+  _viewState = AM_TickViewState(_viewState, mapPlayer()?.mo ?? null);
 }
 
 export function AM_Responder(ev) {
   if (ev === undefined || ev === null) return false;
-  if (ev.type !== 0 /*ev_keydown*/) return false;
   if (!automapactive) {
-    if (ev.data1 === 9 /*KEY_TAB*/) { AM_Start(); return true; }
+    if (ev.type === evtype_t.ev_keydown && ev.data1 === KEY_TAB) {
+      AM_Start();
+      return true;
+    }
     return false;
   }
-  switch (ev.data1) {
-    case 9 /*KEY_TAB*/: AM_Stop(); return true;
-    case 0x2b /*'+'*/:  _scale *= 1.2; return true;
-    case 0x2d /*'-'*/:  _scale /= 1.2; return true;
-    case 0x66 /*'f'*/:  _followMode = !_followMode; return true;
-    case 0x6d /*'m'*/:  AM_addMark(); return true;
-    case 0x63 /*'c'*/:  AM_clearMarks(); return true;
+  const player = mapPlayer();
+  const result = AM_ApplyControlEvent(_viewState, ev, player?.mo ?? null);
+  _viewState = result.state;
+  if (result.action === 'stop') AM_Stop();
+  else if (result.action === 'mark') {
+    if (player !== null) player.message = `${AMSTR_MARKEDSPOT} ${_markpointnum}`;
+    AM_addMark();
+  } else if (result.action === 'clear') {
+    AM_clearMarks();
   }
-  return false;
+  if (player !== null && result.message !== null) {
+    const messages = {
+      followOn: AMSTR_FOLLOWON,
+      followOff: AMSTR_FOLLOWOFF,
+      gridOn: AMSTR_GRIDON,
+      gridOff: AMSTR_GRIDOFF,
+      marksCleared: AMSTR_MARKSCLEARED,
+    };
+    player.message = messages[result.message];
+  }
+  return result.handled;
 }
 
 export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   if (!automapactive) return;
+  // AM_clipMline constrains every framebuffer write to f_w/f_h. Canvas paths
+  // need the equivalent explicit clip or off-window strokes can cover the
+  // status-bar/lower letterbox region.
+  overlayCtx.save();
+  overlayCtx.beginPath();
+  overlayCtx.rect(dstX, dstY, dstW, dstH);
+  overlayCtx.clip();
   overlayCtx.fillStyle = V_PaletteCSS(COLOR_BACKGROUND);
   overlayCtx.fillRect(dstX, dstY, dstW, dstH);
 
-  const cx = dstX + dstW * 0.5;
-  const cy = dstY + dstH * 0.5;
-  const scale = _scale * (dstW / 320);
+  const sx = dstW / AM_FRAME_WIDTH;
+  const sy = dstH / AM_FRAME_HEIGHT;
 
   function project(x, y) {
-    return [cx + (x - _viewX) * scale, cy - (y - _viewY) * scale];
+    const p = AM_ProjectFixedPoint(_viewState, x, y);
+    return [dstX + p.x * sx, dstY + p.y * sy];
   }
 
-  // Grid.
-  overlayCtx.strokeStyle = V_PaletteCSS(COLOR_GRID);
-  overlayCtx.lineWidth = 1;
-  overlayCtx.beginPath();
-  const grid = 128;
-  const left   = _viewX - dstW / (2 * scale);
-  const right  = _viewX + dstW / (2 * scale);
-  const bottom = _viewY - dstH / (2 * scale);
-  const top    = _viewY + dstH / (2 * scale);
-  for (let gx = Math.ceil(left / grid) * grid; gx < right; gx += grid) {
-    const [px] = project(gx, 0);
-    overlayCtx.moveTo(px, dstY);
-    overlayCtx.lineTo(px, dstY + dstH);
+  // am_map.c:AM_drawGrid — disabled by default and aligned to the BLOCKMAP
+  // origin, not world coordinate zero.
+  if (_viewState.grid === true) {
+    overlayCtx.strokeStyle = V_PaletteCSS(COLOR_GRID);
+    overlayCtx.lineWidth = 1;
+    overlayCtx.beginPath();
+    const step = 128 * FRACUNIT; // MAPBLOCKUNITS
+    let start = _viewState.mX;
+    let remainder = (start - bmaporgx) % step;
+    if (remainder !== 0) start += step - remainder;
+    const endX = _viewState.mX + _viewState.mW;
+    for (let gx = start; gx < endX; gx += step) {
+      const [px] = project(gx, 0);
+      overlayCtx.moveTo(px, dstY);
+      overlayCtx.lineTo(px, dstY + dstH);
+    }
+    start = _viewState.mY;
+    remainder = (start - bmaporgy) % step;
+    if (remainder !== 0) start += step - remainder;
+    const endY = _viewState.mY + _viewState.mH;
+    for (let gy = start; gy < endY; gy += step) {
+      const [, py] = project(0, gy);
+      overlayCtx.moveTo(dstX, py);
+      overlayCtx.lineTo(dstX + dstW, py);
+    }
+    overlayCtx.stroke();
   }
-  for (let gy = Math.ceil(bottom / grid) * grid; gy < top; gy += grid) {
-    const [, py] = project(0, gy);
-    overlayCtx.moveTo(dstX, py);
-    overlayCtx.lineTo(dstX + dstW, py);
-  }
-  overlayCtx.stroke();
 
   // Lines, bucketed by color (am_map.c:AM_drawWalls).
   overlayCtx.lineWidth = 1.5;
@@ -156,8 +212,8 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     overlayCtx.strokeStyle = V_PaletteCSS(color);
     overlayCtx.beginPath();
     for (const li of list) {
-      const [x1, y1] = project(li.v1.x / 65536, li.v1.y / 65536);
-      const [x2, y2] = project(li.v2.x / 65536, li.v2.y / 65536);
+      const [x1, y1] = project(li.v1.x, li.v1.y);
+      const [x2, y2] = project(li.v2.x, li.v2.y);
       overlayCtx.moveTo(x1, y1);
       overlayCtx.lineTo(x2, y2);
     }
@@ -165,9 +221,9 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
 
   // Player triangle.
-  const p = players[consoleplayer];
+  const p = mapPlayer();
   if (p !== undefined && p !== null && p.mo !== null) {
-    const [px, py] = project(p.mo.x / 65536, p.mo.y / 65536);
+    const [px, py] = project(p.mo.x, p.mo.y);
     const angle = (p.mo.angle >>> 0) / 0x100000000 * Math.PI * 2;
     const r = 12;
     overlayCtx.strokeStyle = V_PaletteCSS(COLOR_PLAYER);
@@ -192,4 +248,5 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     if (mx < dstX || mx > dstX + dstW || my < dstY || my > dstY + dstH) continue;
     overlayCtx.fillText(String(i), mx, my);
   }
+  overlayCtx.restore();
 }

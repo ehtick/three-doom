@@ -3,11 +3,38 @@ import { D_PausePatchPosition } from '../src/d_display_logic.js';
 const source = await Deno.readTextFile(new URL('../src/d_main.js', import.meta.url));
 const menuSource = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
 
+Deno.test('automap suppresses the complete first-person setup and render path', () => {
+  const displayStart = source.indexOf('function D_Display()');
+  const displayEnd = source.indexOf('// D_DoomLoop:', displayStart);
+  const display = source.slice(displayStart, displayEnd);
+  const guard = display.indexOf('if (doomstat.automapactive !== true)');
+  const setup = display.indexOf('R_SetupFrame(p)', guard);
+  const freeCamera = display.indexOf('D_FreeCamera.update()', setup);
+  const sprites = display.indexOf('_updateSprites()', freeCamera);
+  const sky = display.indexOf('_updateSky()', sprites);
+  const render = display.indexOf('renderer.render(scene, camera)', sky);
+  const overlay = display.indexOf('const o = getOverlay()', render);
+  if (guard < 0 || setup <= guard || freeCamera <= setup || sprites <= freeCamera ||
+      sky <= sprites || render <= sky || overlay <= render) {
+    throw new Error('automap does not guard first-person setup/update/render as one block');
+  }
+});
+
+Deno.test('fullscreen status-bar visibility is overridden by an active automap', () => {
+  const visibility = menuSource.slice(
+    menuSource.indexOf('export function isStatusBarVisible'),
+    menuSource.indexOf('// ---------- Menu definitions'),
+  );
+  if (!visibility.includes('_screenblocks < 11 || automapactive === true')) {
+    throw new Error('screenblocks 11 still hides STBAR while automap is active');
+  }
+});
+
 Deno.test('automap suppresses psprites without suppressing HUD or status bar', () => {
   const displayStart = source.indexOf('function D_Display()');
   const displayEnd = source.indexOf('// D_DoomLoop:', displayStart);
   const display = source.slice(displayStart, displayEnd);
-  const automap = display.indexOf('_amDrawer(o, 0, 0, overlay.width, overlay.height)');
+  const automap = display.indexOf('_amDrawer(o, dx, dy, dw, 168 * scale)');
   const guard = display.indexOf('if (doomstat.automapactive !== true)', automap);
   const psprites = display.indexOf('_drawPlayerSprites(o, p, dx, dy, dw, dh)', guard);
   const guardEnd = display.indexOf('\n      }', psprites);
