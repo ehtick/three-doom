@@ -473,7 +473,8 @@ export async function D_DoomMain() {
   pp.P_PsprSetMobj({ PMobj: PM, PInter: pInter });
   const pTick = await import('./p_tick.js');
   pMap.P_MapSetExternals({ PInter: pInter, PMobj: PM, thinkercap: pTick.thinkercap });
-  // Wire p_mobj → p_map so P_SpawnPlayerMissile can autoaim.
+  // Wire p_mobj → p_map for immediate missile collision and player autoaim.
+  PM.P_SetExternals({ P_TryMove: pMap.P_TryMove });
   PM.P_MobjSetMap({ P_AimLineAttack: pMap.P_AimLineAttack, getLinetarget: pMap.getLinetarget });
   const pUser = await import('./p_user.js');
   pUser.P_UserSetInter({ p_inter: pInter });
