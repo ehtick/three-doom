@@ -520,7 +520,8 @@ P_RegisterAction('A_BFGSpray', (mo) => {
   const ANG90 = 0x40000000;
   for (let i = 0; i < 40; i++) {
     const an = ((mo.angle - (ANG90 >>> 1) + ((ANG90 / 40) | 0) * i) >>> 0);
-    const linetarget = _PMap.P_AimLineAttack(mo.target, an, 16 * 64 * 65536);
+    _PMap.P_AimLineAttack(mo.target, an, 16 * 64 * 65536);
+    const linetarget = _PMap.getLinetarget();
     if (linetarget === null || linetarget === undefined) continue;
     if (_PMobj !== null && typeof _PMobj.P_SpawnMobj === 'function') {
       _PMobj.P_SpawnMobj(linetarget.x, linetarget.y, linetarget.z + (linetarget.height >> 2), 42 /*MT_EXTRABFG*/);
