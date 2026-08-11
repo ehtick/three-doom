@@ -48,6 +48,7 @@ import {
 } from './d_englsh.js';
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
 import { M_ALPHA_KEYS, M_FindAlphaItem } from './m_menu_alpha_logic.js';
+import { M_RestoreMainCursor } from './m_menu_cursor_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { M_ReadThisPlan } from './m_menu_read_logic.js';
@@ -101,15 +102,15 @@ const _saveStrings = new Array(SAVE_SLOTS).fill('EMPTY SLOT');
 
 // ---------- Menus ----------
 const CONTINUE_ITEM = {
-  patch: 'M_CONT', label: 'Continue', alphaKey: M_ALPHA_KEYS.continue,
+  menuKey: 'continue', patch: 'M_CONT', label: 'Continue', alphaKey: M_ALPHA_KEYS.continue,
   action: () => M_ClearMenus(),
 };
 const MAIN_MENU_ITEMS = {
   continue: CONTINUE_ITEM,
-  newgame: { patch: 'M_NGAME', label: 'New Game', alphaKey: M_ALPHA_KEYS.main[0], action: () => M_NewGame() },
-  options: { patch: 'M_OPTION', label: 'Options', alphaKey: M_ALPHA_KEYS.main[1], action: () => pushMenu(OPTIONS_MENU) },
-  readthis: { patch: 'M_RDTHIS', label: 'Read This!', alphaKey: M_ALPHA_KEYS.main[2], action: () => pushMenu(READ_MENU_1) },
-  quit: { patch: 'M_QUITG', label: 'Quit', alphaKey: M_ALPHA_KEYS.main[3], action: () => M_QuitDOOM() },
+  newgame: { menuKey: 'newgame', patch: 'M_NGAME', label: 'New Game', alphaKey: M_ALPHA_KEYS.main[0], action: () => M_NewGame() },
+  options: { menuKey: 'options', patch: 'M_OPTION', label: 'Options', alphaKey: M_ALPHA_KEYS.main[1], action: () => pushMenu(OPTIONS_MENU) },
+  readthis: { menuKey: 'readthis', patch: 'M_RDTHIS', label: 'Read This!', alphaKey: M_ALPHA_KEYS.main[2], action: () => pushMenu(READ_MENU_1) },
+  quit: { menuKey: 'quit', patch: 'M_QUITG', label: 'Quit', alphaKey: M_ALPHA_KEYS.main[3], action: () => M_QuitDOOM() },
 };
 // The C menu has Load/Save between Options and Read This. Those browser rows
 // remain intentionally unavailable; mode layout uses the semantic table above
@@ -120,7 +121,10 @@ const MAIN_MENU_BASE_ITEMS = [
   MAIN_MENU_ITEMS.readthis,
   MAIN_MENU_ITEMS.quit,
 ];
-const MAIN_MENU = { name: 'Main', patch: 'M_DOOM', x: 97, y: 64, items: MAIN_MENU_BASE_ITEMS };
+const MAIN_MENU = {
+  name: 'Main', patch: 'M_DOOM', x: 97, y: 64,
+  items: MAIN_MENU_BASE_ITEMS, lastOn: 0, lastItemKey: null,
+};
 
 // m_menu.c:1882 — shareware and registered show 3 episodes, retail shows 4.
 // (Shareware fall-throughs to registered: `EpiDef.numitems--`.) In shareware,
@@ -341,9 +345,27 @@ function M_EndGame() {
 // was last on. M_SetupNextMenu restores it on entry; the key handlers save it on
 // exit. We mirror that by stashing/restoring `lastOn` on the menu objects across
 // push/pop, so backing out lands on the row you descended from (default 0).
-function _restoreCursor(m) { _selected = (m.lastOn === undefined) ? 0 : m.lastOn; }
-function pushMenu(m) { _currentMenu.lastOn = _selected; _menuStack.push(_currentMenu); _currentMenu = m; _restoreCursor(m); }
-function popMenu()   { _currentMenu.lastOn = _selected; const prev = _menuStack.pop(); _currentMenu = (prev === undefined) ? MAIN_MENU : prev; _restoreCursor(_currentMenu); }
+function _rememberCursor(m) {
+  m.lastOn = _selected;
+  if (m === MAIN_MENU) m.lastItemKey = m.items[_selected]?.menuKey ?? null;
+}
+function _restoreCursor(m) {
+  if (m === MAIN_MENU) {
+    _selected = M_RestoreMainCursor(
+      m.items.map((item) => item.menuKey),
+      m.lastItemKey,
+      m.lastOn,
+    );
+    // Normalize an unavailable browser-only/mode-specific row to the item
+    // actually selected, so it cannot unexpectedly reappear on a later open.
+    m.lastOn = _selected;
+    m.lastItemKey = m.items[_selected]?.menuKey ?? null;
+    return;
+  }
+  _selected = (m.lastOn === undefined) ? 0 : m.lastOn;
+}
+function pushMenu(m) { _rememberCursor(_currentMenu); _menuStack.push(_currentMenu); _currentMenu = m; _restoreCursor(m); }
+function popMenu()   { _rememberCursor(_currentMenu); const prev = _menuStack.pop(); _currentMenu = (prev === undefined) ? MAIN_MENU : prev; _restoreCursor(_currentMenu); }
 // m_menu.c:1686-1693 — Backspace backs out one level, playing sfx_swtchn only
 // when there was a parent to pop to. Touch uses this as its mobile stand-in.
 function M_Back() {
@@ -418,6 +440,11 @@ export function M_Init() {
   _menuStack = [];
   _currentMenu = MAIN_MENU;
   MAIN_MENU.y = M_ReadThisPlan(gamemode).mainY;
+  // MainDef.lastOn is statically zero before the one real startup M_Init.
+  // Reset both representations as well so an explicit browser re-init is a
+  // fresh menu lifecycle rather than retaining state from an earlier run.
+  MAIN_MENU.lastOn = 0;
+  MAIN_MENU.lastItemKey = null;
   _selected = 0;
   _skullFrame = 0;
   _skullTicker = 0;
@@ -434,11 +461,10 @@ export function M_StartControlPanel(playOpenSound = true) {
   MAIN_MENU.y = plan.mainY;
   _currentMenu = MAIN_MENU;
   _menuStack = [];
-  // DEVIATION from m_menu.c:1827 — vanilla restores MAIN_MENU.lastOn on open,
-  // but we rebuild MAIN_MENU.items just above (the conditional Continue row), so
-  // a saved index could mis-point. Open onto the top row instead; the lastOn
-  // memory (see pushMenu/popMenu) is kept only for back-out within an open panel.
-  _selected = 0;
+  // m_menu.c:1729-1731 restores MainDef.lastOn whenever the panel opens. The
+  // browser's row list is dynamic, so restore the remembered semantic item
+  // rather than applying a stale numeric index to a different layout.
+  _restoreCursor(MAIN_MENU);
   // m_menu.c:1614 — opening the control panel plays sfx_swtchn. Placed here
   // (rather than at each call site, as vanilla does) so every ordinary open
   // path — ESC, a title-screen key, pointer-lock loss — gets it. F4 suppresses
@@ -449,7 +475,7 @@ export function M_ClearMenus() {
   set_menuactive(false);
   _menuStack = [];
   _currentMenu = MAIN_MENU;
-  _selected = 0; // fresh root state on close; see the lastOn note in M_StartControlPanel.
+  _selected = 0;
 }
 export function M_Toggle() {
   if (menuactive) M_ClearMenus(); else M_StartControlPanel();
@@ -537,7 +563,7 @@ export function M_Responder(ev) {
     // closes an active panel regardless of its current submenu. The open path
     // plays sfx_swtchn inside M_StartControlPanel in this port.
     if (menuactive !== true) { M_StartControlPanel(); return true; }
-    if (_currentMenu !== null) _currentMenu.lastOn = _selected;
+    if (_currentMenu !== null) _rememberCursor(_currentMenu);
     M_ClearMenus();
     S_StartSound(null, sfx_swtchx);
     return true;
@@ -563,8 +589,15 @@ export function M_Responder(ev) {
     const it = m.items[_selected];
     // m_menu.c:1667 — ENTER on a slider (status==2) acts as the right arrow
     // and plays sfx_stnmov; ENTER on a normal item plays sfx_pistol.
-    if (it.slider === true) { it.set(it.get() + 1); S_StartSound(null, sfx_stnmov); }
-    else if (it.action != null) { it.action(); S_StartSound(null, sfx_pistol); }
+    if (it.slider === true) {
+      _rememberCursor(m);
+      it.set(it.get() + 1);
+      S_StartSound(null, sfx_stnmov);
+    } else if (it.action != null) {
+      _rememberCursor(m);
+      it.action();
+      S_StartSound(null, sfx_pistol);
+    }
     return true;
   }
   // doomdef.h:KEY_BACKSPACE = 127 — d_keyboard sends 127 for Backspace per
@@ -617,11 +650,13 @@ export function M_HandleTap(px, py) {
   if (it.spacer === true) return true;
   if (idx !== _selected) { _selected = idx; S_StartSound(null, sfx_pstop); }
   if (it.slider === true) {
+    _rememberCursor(m);
     // Knob is at doom-x (m.x + 8) + value*8; tap left lowers, right raises.
     const knobX = m.x + 8 + it.get() * 8 + 4;
     it.set(dx < knobX ? it.get() - 1 : it.get() + 1);
     S_StartSound(null, sfx_stnmov);
   } else if (it.action != null) {
+    _rememberCursor(m);
     it.action();
     S_StartSound(null, sfx_pistol);
   }
