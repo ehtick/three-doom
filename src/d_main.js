@@ -8,11 +8,12 @@ import { W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum
 import { M_CheckParm, myargv, myargc } from './m_argv.js';
 import { M_LoadDefaults } from './m_misc.js';
 import { SCREENWIDTH, SCREENHEIGHT, gamestate_t, GameMode_t } from './doomdef.js';
-import { mus_intro, mus_dm2ttl } from './sounds.js';
+import { mus_intro, mus_dm2ttl, sfx_telept } from './sounds.js';
 import * as doomstat from './doomstat.js';
 import { gamestate, set_gamestate, set_gamemode, set_devparm, set_nomonsters, set_respawnparm, set_fastparm, set_gameepisode, set_gamemap, set_gameskill } from './doomstat.js';
 import { R_InitData, R_TextureNumForName, R_FlatNumForName, R_PrecacheLevel } from './r_data.js';
 import { P_Random } from './m_random.js';
+import { ANG45, ANGLETOFINESHIFT, finecosine, finesine } from './tables.js';
 import { P_SetupLevel, P_SetExternals as P_SetupSetExternals } from './p_setup.js';
 import { R_NewMap, R_RenderPlayerView, R_SetupFrame } from './r_main.js';
 import { D_FreeCamera } from './d_freecamera.js';
@@ -29,6 +30,10 @@ import * as _PTick from './p_tick.js';
 import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 import { D_AccumulateTics } from './d_timing.js';
+import {
+  G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
+  P_RecordDeathMatchStart, G_CheckSpot as G_RunCheckSpot,
+} from './g_multiplayer.js';
 
 // ---------- Page screen state ----------
 let pagename   = null; // lump name to draw as full-screen page
@@ -338,21 +343,32 @@ async function D_DoomLoop() {
         _fwipeStep(0, 0, 0, 320, 200, 1);
       }
       if (gamestate === gamestate_t.GS_LEVEL && _pTicker !== null) {
-        // Build ticcmd from either keyboard input or the active demo lump.
+        // Build ticcmds from either keyboard input or the active demo lump.
+        // Vanilla G_Ticker reads one demo command for every active player in
+        // ascending slot order, not just for consoleplayer.
+        const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
         const p = players[consoleplayer];
-        // Wait until the async loadLevel has finished spawning the player
-        // before ticking the play sim. Without this, monsters' P_LookForPlayers
-        // sees all-false playeringame[] and infinite-loops on its for(;;) cycle.
-        if (p === undefined || p === null || p.mo === null) {
+        // Wait until synchronous loadLevel has spawned the complete topology.
+        // P_Ticker visits every active slot, so letting one null player through
+        // would fail even when the non-zero consoleplayer itself was ready.
+        if (activePlayers === null ||
+            doomstat.playeringame[consoleplayer] !== true ||
+            p === undefined || p === null || p.mo === null ||
+            activePlayers.some((activePlayer) =>
+              activePlayer.mo === null || activePlayer.mo === undefined)) {
           continue;
         }
         if (doomstat.demoplayback && _gReadDemoCmd !== null) {
-          _gReadDemoCmd(p.cmd);
+          // G_ReadDemoTiccmd ends playback at the marker, but vanilla still
+          // completes that G_Ticker pass with the commands already present.
+          G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
         } else {
           D_KeyboardInput.buildCmd(p);
         }
         // g_game.c:697 — process BT_SPECIAL (pause) before P_PlayerThink clears it.
-        if (_gCheckSpecial !== null) _gCheckSpecial(p);
+        if (_gCheckSpecial !== null) {
+          for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
+        }
         _pTicker();
         if (_amTicker !== null) _amTicker();
         if (_stTicker !== null) _stTicker();
@@ -546,11 +562,12 @@ export async function D_DoomMain() {
 
   // Wire p_setup -> r_data + p_mobj.
   const { P_SpawnMobj, ONFLOORZ, ONCEILINGZ, MF_SPAWNCEILING, MF_COUNTKILL, MF_COUNTITEM, MF_NOTDMATCH } = await import('./p_mobj.js');
-  const { mobjinfo, NUMMOBJTYPES } = await import('./info.js');
+  const { mobjinfo, NUMMOBJTYPES, MT_TFOG } = await import('./info.js');
   // Make P_InitThinkers visible in loadLevel scope.
   const { P_InitThinkers } = await import('./p_tick.js');
 
   const mobjsByMapThing = new Map();
+  const bodyqueue = new Array(32); // g_game.c:210 — BODYQUESIZE
   if (typeof window !== 'undefined') window.__mobjsByMapThing = mobjsByMapThing;
   // Hook for P_RespawnSpecials to call us during nightmare respawn ticks.
   if (typeof globalThis !== 'undefined') globalThis.__P_SpawnMapThing = (mt) => P_SpawnMapThing(mt);
@@ -581,8 +598,35 @@ export async function D_DoomMain() {
     p.extralight = 0;
     p.fixedcolormap = 0;
     p.viewheight = _PU.VIEWHEIGHT;
-    // P_SetupPsprites runs from loadLevel (async); cards/ST_Start/HU_Start are SP no-ops.
+    pp.P_SetupPsprites(p);
+    // p_mobj.c:688-691 — deathmatch players can operate every keyed door even
+    // though MF_NOTDMATCH keeps the key pickups themselves out of the map.
+    if (ds.deathmatch !== 0) {
+      for (let i = 0; i < p.cards.length; i++) p.cards[i] = true;
+    }
+    // ST_Start/HU_Start are local UI setup and remain active across respawns.
   };
+  // g_game.c:843 — full initial/respawn spot check, including the corpse queue
+  // and teleport fog that consumes the RNG value immediately before the new mo.
+  const G_CheckSpot = (playernum, mt) => G_RunCheckSpot(playernum, mt, {
+    players: doomstat.players,
+    playeringame: doomstat.playeringame,
+    consoleplayer: doomstat.consoleplayer,
+    bodyqueue,
+    getBodyqueSlot: () => doomstat.bodyqueslot,
+    setBodyqueSlot: doomstat.set_bodyqueslot,
+    P_CheckPosition: pMap.P_CheckPosition,
+    P_RemoveMobj: PM.P_RemoveMobj,
+    R_PointInSubsector: _RB.R_PointInSubsector,
+    P_SpawnMobj,
+    S_StartSound: S.S_StartSound,
+    finecosine,
+    finesine,
+    ANG45,
+    ANGLETOFINESHIFT,
+    MT_TFOG,
+    sfx_telept,
+  });
   // p_mobj.c:704 — P_SpawnMapThing.
   const P_SpawnMapThing = (mt) => {
     // Player starts (1..4): playerstarts[] are recorded in P_LoadThings; spawn
@@ -592,8 +636,13 @@ export async function D_DoomMain() {
       if (ds.deathmatch === 0) P_SpawnPlayer(mt); // p_mobj.c:733 — !deathmatch
       return null;
     }
-    // Deathmatch start (type 11) — recorded elsewhere.
-    if (mt.type === 11) return null;
+    // Deathmatch start (type 11) — retain up to vanilla's ten slots. The
+    // numeric deathmatch_p mirrors C's one-past-the-end pointer.
+    if (mt.type === 11) {
+      ds.set_deathmatch_p(P_RecordDeathMatchStart(
+        ds.deathmatchstarts, ds.deathmatch_p, mt));
+      return null;
+    }
     // Skill-bit filter. sk_baby (0) uses bit1, sk_nightmare (4) uses bit4,
     // else 1 << (gameskill-1).
     let bit;
@@ -633,9 +682,11 @@ export async function D_DoomMain() {
     R_FlatNumForName,
     R_PrecacheLevel,
     P_SpawnMapThing,
+    G_DeathMatchSpawnPlayer: _GGame.G_DeathMatchSpawnPlayer,
     P_SpawnSpecials: pSpec.P_SpawnSpecials,
     S_Start:         S.S_Start,
   });
+  _GGame.G_SetExternals({ P_SpawnPlayer, G_CheckSpot });
   // skyflatnum = R_FlatNumForName("F_SKY1") — used by r_plane.js to skip
   // drawing ceiling/floor flats that should show sky.
   const { W_CheckNumForName } = await import('./w_wad.js');
@@ -653,43 +704,35 @@ export async function D_DoomMain() {
     set_gamemap(map);
     set_gameskill(skill);
     set_gamestate(gamestate_t.GS_LEVEL);
-    // Pre-create the player_t struct so P_SpawnMapThing can spawn its mobj
-    // at the moment the player start (type 1) mapthing is processed — keeping
-    // the player early in the thinker list, exactly as vanilla does. (Adding
-    // the player mobj LAST diverges monster→player thinker ordering, which
-    // shifts P_Random consumption and desyncs demos.)
+    // Pre-create every active player_t so P_SpawnMapThing can spawn co-op
+    // players at the moment each numbered start is processed. Deathmatch
+    // players are spawned after THINGS, as in p_setup.c:666-676.
     _PU.P_UserSetExternals({ r_bsp: _RB, p_mobj: _PMobj, gamemode: doomstat.gamemode });
-    // p_mobj.c:638 — reuse the existing player_t so weapons/ammo/armor/keys/
-    // health carry over between levels; allocate one only on the first load
-    // (boot / new game). A fresh struct starts PST_REBORN so P_SpawnPlayer's
-    // gate runs G_PlayerReborn for the initial loadout — matching G_InitNew.
-    let player = doomstat.players[0];
-    if (player === null || player === undefined) {
-      player = _PU.makePlayer();
-      player.playerstate = 2 /*PST_REBORN*/;
-      doomstat.players[0] = player;
-    }
-    doomstat.playeringame[0] = true;
-    player.mo = null; // drop the previous level's mobj link before respawn
+    // p_mobj.c:638 — reuse existing structs so inventory carries between maps.
+    // Only an entirely empty local topology defaults to player 0; demo header
+    // topology (including a non-zero consoleplayer) must remain unchanged.
+    G_EnsurePlayerTopology(doomstat.players, doomstat.playeringame, _PU.makePlayer);
     // P_SetupLevel internally runs P_InitThinkers BEFORE P_LoadThings and
     // P_SpawnSpecials AFTER, matching p_setup.c's ordering.
     P_SetupLevel(episode, map, 0, skill);
     R_NewMap();
-    // Fallback: if P_LoadThings didn't contain a player-1 mapthing (corrupt
-    // map?), spawn at playerstarts[0] now so the rest of the boot doesn't
-    // crash on a null player.mo.
-    if (player.mo === null) {
-      const ps = doomstat.playerstarts[0];
-      if (ps !== undefined) P_SpawnPlayer({ ...ps, type: 1 }); // corrupt-map fallback
+    // Corrupt-map fallback: a valid co-op map has one numbered start per active
+    // player, while deathmatch spawned everyone just after P_LoadThings.
+    for (let i = 0; i < doomstat.playeringame.length; i++) {
+      if (doomstat.playeringame[i] !== true) continue;
+      const activePlayer = doomstat.players[i];
+      if (activePlayer.mo === null || activePlayer.mo === undefined) {
+        const ps = doomstat.playerstarts[i];
+        if (ps !== undefined) P_SpawnPlayer({ ...ps, type: i + 1 });
+      }
     }
     _PTick.P_SetExternals({
       P_PlayerThink: _PU.P_PlayerThink,
       P_RespawnSpecials: PM.P_RespawnSpecials,
       P_UpdateSpecials: pSpec.P_UpdateSpecials,
     });
-    // Clear both overlays and raise the ready weapon from WEAPONBOTTOM.
-    pp.P_SetupPsprites(player);
-    D_KeyboardInput.init(player);
+    const localPlayer = doomstat.players[doomstat.consoleplayer];
+    if (localPlayer !== null && localPlayer !== undefined) D_KeyboardInput.init(localPlayer);
   };
   // Expose to G_DoLoadLevel callers (menu New Game) — see g_game.js setExternals.
   if (_GGame.G_SetExternals) _GGame.G_SetExternals({ loadLevel });

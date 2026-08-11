@@ -20,8 +20,8 @@ import { GameMode_t, MAXPLAYERS } from './doomdef.js';
 import { gamemode, set_leveltime, playerstarts,
   set_totalkills, set_totalitems, set_totalsecret,
   set_levelstarttic, set_bodyqueslot,
-  players, consoleplayer, deathmatch_p, set_deathmatch_p,
-  deathmatchstarts, wminfo } from './doomstat.js';
+  players, playeringame, consoleplayer, deathmatch, set_deathmatch_p,
+  wminfo } from './doomstat.js';
 import { P_InitThinkers } from './p_tick.js';
 import { I_Error } from './i_system.js';
 
@@ -78,6 +78,7 @@ let R_PrecacheLevel     = () => {};
 // specials and sound modules are loaded).
 let _P_SpawnSpecials = null;
 let _S_Start = null;
+let _G_DeathMatchSpawnPlayer = null;
 
 export function P_SetExternals(refs) {
   if (refs.R_TextureNumForName != null) R_TextureNumForName = refs.R_TextureNumForName;
@@ -86,6 +87,9 @@ export function P_SetExternals(refs) {
   if (refs.R_PrecacheLevel != null)     R_PrecacheLevel     = refs.R_PrecacheLevel;
   if (refs.P_SpawnSpecials != null)     _P_SpawnSpecials    = refs.P_SpawnSpecials;
   if (refs.S_Start != null)             _S_Start            = refs.S_Start;
+  if (refs.G_DeathMatchSpawnPlayer != null) {
+    _G_DeathMatchSpawnPlayer = refs.G_DeathMatchSpawnPlayer;
+  }
 }
 
 function readName8(bytes, offset) {
@@ -401,6 +405,17 @@ export function P_SetupLevel(episode, map, _playermask, _skill) {
   rejectmatrix = W_CacheLumpNum(lumpnum + ML_REJECT, 0);
   P_GroupLines();
   P_LoadThings(lumpnum + ML_THINGS);
+
+  // p_setup.c:666-676 — co-op players were spawned at their numbered starts
+  // while THINGS loaded. Deathmatch suppresses those spawns, then places every
+  // active player at a random deathmatch start here, in ascending player order.
+  if (deathmatch !== 0 && _G_DeathMatchSpawnPlayer !== null) {
+    for (let i = 0; i < MAXPLAYERS; i++) {
+      if (playeringame[i] !== true) continue;
+      players[i].mo = null;
+      _G_DeathMatchSpawnPlayer(i);
+    }
+  }
 
   // p_setup.c:633 — spawn special sectors and queue per-tic effects.
   if (_P_SpawnSpecials !== null) _P_SpawnSpecials();

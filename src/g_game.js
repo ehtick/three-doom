@@ -23,13 +23,22 @@ import { states, mobjinfo, S_SARG_RUN1, S_SARG_PAIN2,
 import { S_PauseSound, S_ResumeSound } from './s_sound.js';
 import { F_StartFinale } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
+import { I_Error } from './i_system.js';
+import {
+  G_DeathMatchSpawnPlayer as G_RunDeathMatchSpawnPlayer,
+  G_DoReborn as G_RunDoReborn,
+} from './g_multiplayer.js';
 
 let _deferred = null; // pending gameaction params
 
 // External hooks (wired by d_main.js).
 let _loadLevel = null; // async (episode, map, skill) => Promise<void>
+let _spawnPlayer = null;
+let _checkSpot = null;
 export function G_SetExternals(refs) {
   if (refs.loadLevel != null) _loadLevel = refs.loadLevel;
+  if (refs.P_SpawnPlayer != null) _spawnPlayer = refs.P_SpawnPlayer;
+  if (refs.G_CheckSpot != null) _checkSpot = refs.G_CheckSpot;
 }
 
 // g_game.c:237 — G_BuildTiccmd. Browser port lives in d_keyboard.js, which
@@ -92,7 +101,7 @@ _ensureResponders();
 export function G_Ticker() {
   // g_game.c:612 — do player reborns if needed.
   for (let i = 0; i < MAXPLAYERS; i++) {
-    if (playeringame[i] && players[i] !== null &&
+    if (playeringame[i] && players[i] !== null && players[i] !== undefined &&
         players[i].playerstate === 2 /*PST_REBORN*/) {
       G_DoReborn(i);
     }
@@ -203,14 +212,19 @@ export function G_PlayerReborn(playernum) {
   p.maxammo[0] = 200; p.maxammo[1] = 50; p.maxammo[2] = 300; p.maxammo[3] = 50;
 }
 
-// g_game.c:922 — G_DoReborn. (Netgame respawn-at-start is not ported.)
+// g_game.c:922 — G_DoReborn.
 export function G_DoReborn(playernum) {
-  if (doomstat.netgame === false) {
-    // g_game.c:928 — reload the level from scratch. The loadout reset happens at
-    // spawn time via P_SpawnPlayer's PST_REBORN gate (the player is already
-    // PST_REBORN here, set by P_DeathThink on the respawn keypress).
-    set_gameaction(gameaction_t.ga_loadlevel);
-  }
+  if (doomstat.netgame !== false && (_spawnPlayer === null || _checkSpot === null)) return false;
+  return G_RunDoReborn(playernum, {
+    netgame: doomstat.netgame,
+    deathmatch: doomstat.deathmatch,
+    players,
+    playerstarts: doomstat.playerstarts,
+    queueLoadLevel: () => set_gameaction(gameaction_t.ga_loadlevel),
+    G_CheckSpot: _checkSpot,
+    G_DeathMatchSpawnPlayer,
+    P_SpawnPlayer: _spawnPlayer,
+  });
 }
 
 export function G_DoLoadLevel() {
@@ -225,7 +239,8 @@ export function G_DoLoadLevel() {
   }
   // g_game.c:477-482 — revive dead players + reset frags.
   for (let i = 0; i < MAXPLAYERS; i++) {
-    if (playeringame[i] && players[i] !== null && players[i].playerstate === 1 /*PST_DEAD*/) {
+    if (playeringame[i] && players[i] !== null && players[i] !== undefined &&
+        players[i].playerstate === 1 /*PST_DEAD*/) {
       players[i].playerstate = 2 /*PST_REBORN*/;
     }
     if (players[i] !== null && players[i] !== undefined && players[i].frags) {
@@ -613,13 +628,16 @@ export function G_DoWorldDone() {
 }
 // g_game.c:897 — random DM spawn (vanilla uses P_Random).
 export function G_DeathMatchSpawnPlayer(playernum) {
-  const ds = doomstat;
-  const dms = ds.deathmatchstarts || [];
-  const choice = dms.length > 0
-    ? dms[P_Random() % dms.length]
-    : (ds.playerstarts && ds.playerstarts[playernum]);
-  if (choice === undefined || typeof globalThis.__P_SpawnPlayer !== 'function') return;
-  globalThis.__P_SpawnPlayer(choice);
+  if (_spawnPlayer === null || _checkSpot === null) return false;
+  return G_RunDeathMatchSpawnPlayer(playernum, {
+    deathmatchstarts: doomstat.deathmatchstarts,
+    deathmatchCount: doomstat.deathmatch_p,
+    playerstarts: doomstat.playerstarts,
+    P_Random,
+    G_CheckSpot: _checkSpot,
+    P_SpawnPlayer: _spawnPlayer,
+    I_Error,
+  });
 }
 
 export function G_ExitLevel() {
