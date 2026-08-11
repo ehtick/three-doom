@@ -398,16 +398,32 @@ async function D_DoomLoop() {
       if (advancedemo) D_DoAdvanceDemo();
       if (_menuTicker !== null) _menuTicker();
       if (_gTicker !== null) _gTicker();
-      if (gamestate === gamestate_t.GS_DEMOSCREEN) D_PageTicker();
+
+      // g_game.c:654-710 — commands are populated for every game state after
+      // game actions settle and before the state-specific ticker runs. This
+      // keeps demos consuming commands through intermissions/finales and lets
+      // recorded attack/use buttons drive those screens.
+      const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
+      if (activePlayers !== null) {
+        if (doomstat.demoplayback && _gReadDemoCmd !== null) {
+          G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
+        } else {
+          const localPlayer = players[consoleplayer];
+          if (localPlayer !== undefined && localPlayer !== null) {
+            if (gamestate === gamestate_t.GS_LEVEL) D_KeyboardInput.buildCmd(localPlayer);
+            else D_KeyboardInput.buildFinaleCmd(localPlayer);
+          }
+        }
+        if (_gCheckSpecial !== null) {
+          for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
+        }
+      }
+
       // Advance wipe even while in level transition.
       if (_fwipeStep !== null && _fwipeActive !== null && _fwipeActive()) {
         _fwipeStep(0, 0, 0, 320, 200, 1);
       }
       if (gamestate === gamestate_t.GS_LEVEL && _pTicker !== null) {
-        // Build ticcmds from either keyboard input or the active demo lump.
-        // Vanilla G_Ticker reads one demo command for every active player in
-        // ascending slot order, not just for consoleplayer.
-        const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
         const p = players[consoleplayer];
         // Wait until synchronous loadLevel has spawned the complete topology.
         // P_Ticker visits every active slot, so letting one null player through
@@ -421,17 +437,6 @@ async function D_DoomLoop() {
           // in the browser port. Consume the scheduler tic without running an
           // incomplete player topology; gametic still advances below.
         } else {
-          if (doomstat.demoplayback && _gReadDemoCmd !== null) {
-            // G_ReadDemoTiccmd ends playback at the marker, but vanilla still
-            // completes that G_Ticker pass with the commands already present.
-            G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
-          } else {
-            D_KeyboardInput.buildCmd(p);
-          }
-          // g_game.c:697 — process BT_SPECIAL (pause) before P_PlayerThink clears it.
-          if (_gCheckSpecial !== null) {
-            for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
-          }
           _pTicker();
           if (_amTicker !== null) _amTicker();
           if (_stTicker !== null) _stTicker();
@@ -444,8 +449,9 @@ async function D_DoomLoop() {
         // Drive the intermission counters + 'press key to continue' timer.
         _wiTicker();
       } else if (gamestate === gamestate_t.GS_FINALE && _fTicker !== null) {
-        D_KeyboardInput.buildFinaleCmd(players[consoleplayer]);
         _fTicker();
+      } else if (gamestate === gamestate_t.GS_DEMOSCREEN) {
+        D_PageTicker();
       }
       // I_Quit can synchronously dispatch doom:quit from inside a ticker.
       if (D_DoomRafLoop.active(loopToken) !== true) return;
