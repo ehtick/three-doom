@@ -14,6 +14,9 @@ import { MT_MISC0, MT_MISC1, MT_MISC2, MT_MISC3, MT_MISC4, MT_MISC5, MT_MISC6,
 // Re-export so p_inter.js owns the MT_* constants needed by P_KillMobj's drop logic.
 import { ammotype_t, weapontype_t, skill_t } from './doomdef.js';
 import { P_Random } from './m_random.js';
+import {
+  P_KeyStaysInWorld, P_WeaponAmmoClips, P_WeaponStaysInWorld,
+} from './p_pickup_logic.js';
 
 // Externals (wired at init).
 let _S = null;
@@ -73,8 +76,22 @@ export function P_GiveAmmo(player, ammo, num) {
   return true;
 }
 export function P_GiveWeapon(player, weapon, dropped) {
+  dropped = dropped !== 0 && dropped !== false;
+  if (P_WeaponStaysInWorld(netgame, deathmatch, dropped)) {
+    // p_inter.c:177-195 — cooperative and old deathmatch leave map-placed
+    // weapons for every player. A player can take each placed weapon once.
+    if (player.weaponowned[weapon] === true) return false;
+    player.bonuscount += 6 /*BONUSADD*/;
+    player.weaponowned[weapon] = true;
+    P_GiveAmmo(player, ammoForWeapon(weapon), P_WeaponAmmoClips(netgame, deathmatch, dropped));
+    player.pendingweapon = weapon;
+    if (player === _players[consoleplayer] && _S !== null) {
+      _S.S_StartSound(null, 33 /*sfx_wpnup*/);
+    }
+    return false;
+  }
   const wasOwned = player.weaponowned[weapon];
-  const clips = (dropped !== 0 && dropped !== false) ? 1 : 2;
+  const clips = P_WeaponAmmoClips(netgame, deathmatch, dropped);
   const gaveAmmo = P_GiveAmmo(player, ammoForWeapon(weapon), clips);
   if (wasOwned === true) return gaveAmmo;
   player.weaponowned[weapon] = true;
@@ -214,12 +231,12 @@ export function P_TouchSpecialThing(special, toucher) {
       if (P_GivePower(player, pw_infrared) === false) return;
       player.message = 'Light Amplification Visor'; sound = 93 /*sfx_getpow*/; break;
     // Keys (always picked up; message only printed if not already owned).
-    case MT_MISC4: if (player.cards[0] !== true) player.message = 'Picked up a blue keycard.';   P_GiveCard(player, 0); break;
-    case MT_MISC5: if (player.cards[2] !== true) player.message = 'Picked up a red keycard.';    P_GiveCard(player, 2); break;
-    case MT_MISC6: if (player.cards[1] !== true) player.message = 'Picked up a yellow keycard.'; P_GiveCard(player, 1); break;
-    case MT_MISC7: if (player.cards[4] !== true) player.message = 'Picked up a yellow skull key.'; P_GiveCard(player, 4); break;
-    case MT_MISC8: if (player.cards[5] !== true) player.message = 'Picked up a red skull key.';    P_GiveCard(player, 5); break;
-    case MT_MISC9: if (player.cards[3] !== true) player.message = 'Picked up a blue skull key.';   P_GiveCard(player, 3); break;
+    case MT_MISC4: if (player.cards[0] !== true) player.message = 'Picked up a blue keycard.';   P_GiveCard(player, 0); if (P_KeyStaysInWorld(netgame)) return; break;
+    case MT_MISC5: if (player.cards[2] !== true) player.message = 'Picked up a red keycard.';    P_GiveCard(player, 2); if (P_KeyStaysInWorld(netgame)) return; break;
+    case MT_MISC6: if (player.cards[1] !== true) player.message = 'Picked up a yellow keycard.'; P_GiveCard(player, 1); if (P_KeyStaysInWorld(netgame)) return; break;
+    case MT_MISC7: if (player.cards[4] !== true) player.message = 'Picked up a yellow skull key.'; P_GiveCard(player, 4); if (P_KeyStaysInWorld(netgame)) return; break;
+    case MT_MISC8: if (player.cards[5] !== true) player.message = 'Picked up a red skull key.';    P_GiveCard(player, 5); if (P_KeyStaysInWorld(netgame)) return; break;
+    case MT_MISC9: if (player.cards[3] !== true) player.message = 'Picked up a blue skull key.';   P_GiveCard(player, 3); if (P_KeyStaysInWorld(netgame)) return; break;
     // Backpack is one-shot ammo-cap doubler; always picked up.
     case MT_MISC24: P_GiveBackpack(player); player.message = 'Picked up a backpack full of ammo!'; break;
     default: return; // unknown special — leave it in place
@@ -238,7 +255,7 @@ import { P_SetMobjState, MF_SHOOTABLE, MF_FLOAT, MF_SKULLFLY,
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine, ANG180 } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { FixedMul } from './m_fixed.js';
-import { gameskill, players as _players, consoleplayer, netgame } from './doomstat.js';
+import { gameskill, players as _players, consoleplayer, netgame, deathmatch } from './doomstat.js';
 
 export function P_KillMobj(source, target) {
   if (target.info === null) return;
