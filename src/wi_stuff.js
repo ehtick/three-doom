@@ -1,8 +1,7 @@
 // Ported from: linuxdoom-1.10/wi_stuff.c — intermission ("between missions")
-// screen. Faithful port of the single-player path: animated background, the
-// "<Level> Finished!" tally with the count-up state machine, and the Doom 1
-// world map ("Entering …" with splats on visited levels + the flashing
-// "You Are Here" pointer).
+// screen. Faithful port of the single-player, co-op, and deathmatch paths:
+// animated background, count-up state machines, stat tables, and the Doom 1
+// world map ("Entering …" with splats and the flashing "You Are Here" pointer).
 //
 // Rendering uses the Canvas2D overlay (v_video.js V_DecodePatchToCanvas /
 // V_DrawPatchAtCanvas) instead of the software framebuffer, but every patch,
@@ -11,52 +10,21 @@
 // the on-canvas rectangle the 320x200 virtual screen maps to; we scale virtual
 // coords by sx=dw/320, sy=dh/200.
 //
-// Deathmatch / netgame stat tables (WI_drawDeathmatchStats /
-// WI_drawNetgameStats) are intentionally omitted — they are unreachable in this
-// single-player port.
-
-import { gamemode, players, playeringame } from './doomstat.js';
-import { GameMode_t, TICRATE, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
+import { deathmatch, gamemode, language, netgame, players, playeringame } from './doomstat.js';
+import { GameMode_t, Language_t, MAXPLAYERS, TICRATE, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
 import { S_StartSound, S_ChangeMusic } from './s_sound.js';
 import { M_Random } from './m_random.js';
 import { mus_inter, mus_dm2int, sfx_pistol, sfx_barexp, sfx_sgcock } from './sounds.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
 import { WI_CheckForAccelerate } from './wi_input_logic.js';
-
-// ----------------------------------------------------------------------------
-// Par-time tables (g_game.c:978/987). Vanilla stores these in g_game and bakes
-// wminfo.partime = TICRATE*pars[...]; this port's G_DoCompleted doesn't, so WI
-// computes partime (in tics) from these at WI_Start.
-// ----------------------------------------------------------------------------
-
-// Doom 1 par times [episode][map]; episode-0 row unused, episodes 1..3 fill
-// maps 1..9. Episode 4 (Ultimate Doom) has no canonical par times.
-const pars = [
-  [0],
-  [0, 30, 75, 120, 90, 165, 180, 180, 30, 165],
-  [0, 90, 90,  90, 120, 90, 360, 240, 30, 170],
-  [0, 90, 45,  90, 150, 90,  90, 165, 30, 135],
-];
-
-// Doom 2 par times [map-1], maps 1..32.
-const cpars = [
-   30, 90,120,120, 90,150,120,120,270, 90,  //  1-10
-  210,150,150,150,210,150,420,150,210,150,  // 11-20
-  240,150,180,150,150,300,330,420,300,180,  // 21-30
-  120, 30,                                  // 31-32
-];
-
-// Par time (in TICS) for the just-finished map, indexed by 0-based epsd/last
-// like wbstartstruct. Returns 0 when there is no canonical par (E4 / OOB).
-function _parTimeTics(epsd0, last0) {
-  if (gamemode === GameMode_t.commercial) {
-    return (last0 >= 0 && last0 < 32) ? TICRATE * cpars[last0] : 0;
-  }
-  const ep = epsd0 + 1, mp = last0 + 1;
-  if (ep >= 1 && ep <= 3 && mp >= 1 && mp <= 9) return TICRATE * pars[ep][mp];
-  return 0;
-}
+import { G_IntermissionParTime } from './g_completion.js';
+import {
+  WI_InitDeathmatchStats,
+  WI_InitNetgameStats,
+  WI_UpdateDeathmatchStats,
+  WI_UpdateNetgameStats,
+} from './wi_multiplayer.js';
 
 // ----------------------------------------------------------------------------
 // Constants (wi_stuff.c / wi_stuff.h)
@@ -66,12 +34,27 @@ const NUMMAPS = 9;
 
 // GLOBAL LOCATIONS
 const WI_TITLEY = 2;
+const WI_SPACINGY = 33;
 
 // SINGLE-PLAYER STUFF
 const SP_STATSX = 50;
 const SP_STATSY = 50;
 const SP_TIMEX  = 16;
 const SP_TIMEY  = SCREENHEIGHT - 32;
+
+// NET GAME STUFF
+const NG_STATSY = 50;
+const NG_SPACINGX = 64;
+
+// DEATHMATCH STUFF
+const DM_MATRIXX = 42;
+const DM_MATRIXY = 68;
+const DM_SPACINGX = 40;
+const DM_TOTALSX = 269;
+const DM_KILLERSX = 10;
+const DM_KILLERSY = 100;
+const DM_VICTIMSX = 5;
+const DM_VICTIMSY = 50;
 
 // in seconds
 const SHOWNEXTLOCDELAY = 4;
@@ -167,6 +150,9 @@ let bcnt = 0;              // background-animation timing
 let cnt_kills = 0, cnt_items = 0, cnt_secret = 0; // single-player [0] slots
 let cnt_time = 0, cnt_par = 0, cnt_pause = 0;
 let sp_state = 0;
+let dm_stats = null;
+let ng_stats = null;
+let dofrags = 0;            // static in wi_stuff.c; intentionally persists
 let snl_pointeron = false;
 
 let _active = false;       // gates ticker/drawer/responder when not running
@@ -181,8 +167,12 @@ let splat     = null;        // visited-level splat
 let percent   = null, colon = null, wiminus = null;
 const num     = new Array(10).fill(null); // 0-9
 let finished  = null, entering = null, sp_secret = null;
-let kills     = null, items = null;
+let kills     = null, secret = null, items = null, frags = null;
 let time      = null, par = null, sucks = null;
+let killers   = null, victims = null, total = null;
+let star      = null, bstar = null;
+const playerPatches = new Array(MAXPLAYERS).fill(null);
+const grayPlayerPatches = new Array(MAXPLAYERS).fill(null);
 let lnames    = [];          // level-name patches (centered)
 const _splatArr = [null];    // [splat] wrapper for WI_drawOnLnode; filled by WI_loadData
 
@@ -447,6 +437,134 @@ function WI_drawNoState() {
   WI_drawShowNextLoc();
 }
 
+// --- Deathmatch stats (wi_stuff.c:843-1072) ---
+
+function WI_initDeathmatchStats() {
+  state = StatCount;
+  acceleratestage = 0;
+  dm_stats = WI_InitDeathmatchStats(playeringame);
+  WI_initAnimatedBack();
+}
+
+function WI_updateDeathmatchStats() {
+  WI_updateAnimatedBack();
+  const result = WI_UpdateDeathmatchStats(
+    dm_stats,
+    plrs,
+    playeringame,
+    bcnt,
+    acceleratestage,
+  );
+  acceleratestage = result.accelerate;
+  for (const sound of result.sounds) S_StartSound(null, sound);
+  if (result.advance) {
+    if (gamemode === GameMode_t.commercial) WI_initNoState();
+    else WI_initShowNextLoc();
+  }
+}
+
+function WI_drawDeathmatchStats() {
+  WI_slamBackground();
+  WI_drawAnimatedBack();
+  WI_drawLF();
+
+  drawPatch(total, DM_TOTALSX - ((total.w / 2) | 0), DM_MATRIXY - WI_SPACINGY + 10);
+  drawPatch(killers, DM_KILLERSX, DM_KILLERSY);
+  drawPatch(victims, DM_VICTIMSX, DM_VICTIMSY);
+
+  let x = DM_MATRIXX + DM_SPACINGX;
+  let y = DM_MATRIXY;
+  for (let i = 0; i < playerPatches.length; i++) {
+    const patch = playerPatches[i];
+    if (playeringame[i] === true) {
+      const halfWidth = (patch.w / 2) | 0;
+      drawPatch(patch, x - halfWidth, DM_MATRIXY - WI_SPACINGY);
+      drawPatch(patch, DM_MATRIXX - halfWidth, y);
+      if (i === me) {
+        drawPatch(bstar, x - halfWidth, DM_MATRIXY - WI_SPACINGY);
+        drawPatch(star, DM_MATRIXX - halfWidth, y);
+      }
+    }
+    x += DM_SPACINGX;
+    y += WI_SPACINGY;
+  }
+
+  y = DM_MATRIXY + 10;
+  const numberWidth = num[0].w;
+  for (let i = 0; i < playerPatches.length; i++) {
+    x = DM_MATRIXX + DM_SPACINGX;
+    if (playeringame[i] === true) {
+      for (let j = 0; j < playerPatches.length; j++) {
+        if (playeringame[j] === true) WI_drawNum(x + numberWidth, y, dm_stats.frags[i][j], 2);
+        x += DM_SPACINGX;
+      }
+      WI_drawNum(DM_TOTALSX + numberWidth, y, dm_stats.totals[i], 2);
+    }
+    y += WI_SPACINGY;
+  }
+}
+
+// --- Co-op stats (wi_stuff.c:1074-1314) ---
+
+function WI_initNetgameStats() {
+  state = StatCount;
+  acceleratestage = 0;
+  ng_stats = WI_InitNetgameStats(plrs, playeringame, dofrags);
+  dofrags = ng_stats.dofrags ? 1 : 0;
+  WI_initAnimatedBack();
+}
+
+function WI_updateNetgameStats() {
+  WI_updateAnimatedBack();
+  const result = WI_UpdateNetgameStats(
+    ng_stats,
+    wbs,
+    playeringame,
+    bcnt,
+    acceleratestage,
+  );
+  acceleratestage = result.accelerate;
+  for (const sound of result.sounds) S_StartSound(null, sound);
+  if (result.advance) {
+    if (gamemode === GameMode_t.commercial) WI_initNoState();
+    else WI_initShowNextLoc();
+  }
+}
+
+function WI_drawNetgameStats() {
+  WI_slamBackground();
+  WI_drawAnimatedBack();
+  WI_drawLF();
+
+  const statsX = 32 + ((star.w / 2) | 0) + 32 * (ng_stats.dofrags ? 0 : 1);
+  drawPatch(kills, statsX + NG_SPACINGX - kills.w, NG_STATSY);
+  drawPatch(items, statsX + 2 * NG_SPACINGX - items.w, NG_STATSY);
+  drawPatch(secret, statsX + 3 * NG_SPACINGX - secret.w, NG_STATSY);
+  if (ng_stats.dofrags) {
+    drawPatch(frags, statsX + 4 * NG_SPACINGX - frags.w, NG_STATSY);
+  }
+
+  let y = NG_STATSY + kills.h;
+  const percentWidth = percent.w;
+  for (let i = 0; i < playerPatches.length; i++) {
+    if (playeringame[i] !== true) continue;
+    let x = statsX;
+    drawPatch(playerPatches[i], x - playerPatches[i].w, y);
+    if (i === me) drawPatch(star, x - playerPatches[i].w, y);
+
+    x += NG_SPACINGX;
+    WI_drawPercent(x - percentWidth, y + 10, ng_stats.kills[i]);
+    x += NG_SPACINGX;
+    WI_drawPercent(x - percentWidth, y + 10, ng_stats.items[i]);
+    x += NG_SPACINGX;
+    WI_drawPercent(x - percentWidth, y + 10, ng_stats.secret[i]);
+    x += NG_SPACINGX;
+    if (ng_stats.dofrags) WI_drawNum(x, y + 10, ng_stats.frags[i], -1);
+
+    y += WI_SPACINGY;
+  }
+}
+
 // --- Single-player stats (wi_stuff.c:1316) ---
 
 function _pctTarget(count, max) {
@@ -552,7 +670,7 @@ export function WI_Responder(_ev) {
   return false;
 }
 
-// Updates stuff each tick (wi_stuff.c:1502). Single-player path only.
+// Updates stuff each tick (wi_stuff.c:1502).
 export function WI_Ticker() {
   if (_active !== true) return;
 
@@ -569,7 +687,11 @@ export function WI_Ticker() {
   if (WI_CheckForAccelerate(players, playeringame)) acceleratestage = 1;
 
   switch (state) {
-    case StatCount:   WI_updateStats();       break;
+    case StatCount:
+      if (deathmatch !== 0) WI_updateDeathmatchStats();
+      else if (netgame) WI_updateNetgameStats();
+      else WI_updateStats();
+      break;
     case ShowNextLoc: WI_updateShowNextLoc(); break;
     case NoState:     WI_updateNoState();      break;
   }
@@ -624,10 +746,17 @@ function WI_loadData() {
   entering = V_DecodePatchToCanvas('WIENTER');
   // "kills"
   kills = V_DecodePatchToCanvas('WIOSTK');
+  // "scrt" (co-op table label)
+  secret = V_DecodePatchToCanvas('WIOSTS');
   // "secret" (single-player label)
   sp_secret = V_DecodePatchToCanvas('WISCRT2');
-  // "items"
-  items = V_DecodePatchToCanvas('WIOSTI');
+  // French co-op uses its alternate "objects" label (wi_stuff.c:1654-1663).
+  const itemPatch = language === Language_t.french && netgame && deathmatch === 0
+    ? 'WIOBJ'
+    : 'WIOSTI';
+  items = V_DecodePatchToCanvas(itemPatch);
+  // "frgs"
+  frags = V_DecodePatchToCanvas('WIFRGS');
   // ":"
   colon = V_DecodePatchToCanvas('WICOLON');
   // "time"
@@ -636,6 +765,17 @@ function WI_loadData() {
   sucks = V_DecodePatchToCanvas('WISUCKS');
   // "par"
   par = V_DecodePatchToCanvas('WIPAR');
+  // deathmatch matrix labels
+  killers = V_DecodePatchToCanvas('WIKILRS');
+  victims = V_DecodePatchToCanvas('WIVCTMS');
+  total = V_DecodePatchToCanvas('WIMSTT');
+  // local-player face markers
+  star = V_DecodePatchToCanvas('STFST01');
+  bstar = V_DecodePatchToCanvas('STFDEAD0');
+  for (let i = 0; i < playerPatches.length; i++) {
+    playerPatches[i] = V_DecodePatchToCanvas('STPB' + i);
+    grayPlayerPatches[i] = V_DecodePatchToCanvas('WIBP' + (i + 1));
+  }
 }
 
 // Decoded patches live in v_video's central cache, but the intermission also
@@ -653,10 +793,19 @@ function WI_unloadData() {
   entering = null;
   sp_secret = null;
   kills = null;
+  secret = null;
   items = null;
+  frags = null;
   time = null;
   par = null;
   sucks = null;
+  killers = null;
+  victims = null;
+  total = null;
+  star = null;
+  bstar = null;
+  playerPatches.fill(null);
+  grayPlayerPatches.fill(null);
   lnames = [];
   _splatArr[0] = null;
   for (const episode of anims) {
@@ -680,7 +829,11 @@ export function WI_Drawer(ctx, dx, dy, dw, dh) {
   _ctx = ctx; _ox = dx; _oy = dy; _sx = dw / 320; _sy = dh / 200;
 
   switch (state) {
-    case StatCount:   WI_drawStats();       break;
+    case StatCount:
+      if (deathmatch !== 0) WI_drawDeathmatchStats();
+      else if (netgame) WI_drawNetgameStats();
+      else WI_drawStats();
+      break;
     case ShowNextLoc: WI_drawShowNextLoc(); break;
     case NoState:     WI_drawNoState();      break;
   }
@@ -700,16 +853,17 @@ function WI_initVariables(wbstartstruct) {
 
   if (gamemode !== GameMode_t.retail) { if (wbs.epsd > 2) wbs.epsd -= 3; }
 
-  // Vanilla bakes wminfo.partime in G_DoCompleted; this port doesn't, so derive
-  // it (in tics) here from the par tables.
+  // External fixtures may omit partime; production G_DoCompleted supplies it.
   if (wbs.partime === undefined || wbs.partime === null)
-    wbs.partime = _parTimeTics(wbs.epsd, wbs.last);
+    wbs.partime = G_IntermissionParTime(gamemode, wbs.epsd + 1, wbs.last + 1);
 }
 
 export function WI_Start(wbstartstruct, onDone) {
   _onDone = (onDone !== null && onDone !== undefined) ? onDone : (() => {});
   WI_initVariables(wbstartstruct);
   WI_loadData();
-  WI_initStats(); // single-player
+  if (deathmatch !== 0) WI_initDeathmatchStats();
+  else if (netgame) WI_initNetgameStats();
+  else WI_initStats();
   _active = true;
 }

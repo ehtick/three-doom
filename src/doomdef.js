@@ -37,7 +37,7 @@ export const INV_ASPECT_RATIO = 0.625;
 export const SCREENWIDTH      = 320;
 export const SCREENHEIGHT     = 200;
 
-// Multiplayer cap (kept for struct sizing — single-player port uses 1 active).
+// Vanilla multiplayer cap; player, demo, and intermission tables use four slots.
 export const MAXPLAYERS = 4;
 
 // State updates, number of tics / second.

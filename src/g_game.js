@@ -32,6 +32,7 @@ import {
   G_DoReborn as G_RunDoReborn,
 } from './g_multiplayer.js';
 import { G_NextDisplayPlayer, G_ShouldCycleDisplayPlayer } from './g_spy_logic.js';
+import { G_BuildIntermissionInfo } from './g_completion.js';
 
 let _deferred = null; // pending gameaction params
 
@@ -591,33 +592,23 @@ export function G_DoCompleted() {
     }
   }
 
-  const pCon = players[consoleplayer];
-  const didsecret = (pCon !== null && pCon !== undefined && pCon.didsecret === true);
-
-  const plyrSnap = [];
-  for (let i = 0; i < players.length; i++) {
-    const p = players[i];
-    if (p === undefined || p === null) { plyrSnap.push({ skills: 0, sitems: 0, ssecret: 0, stime: 0, in: false }); continue; }
-    plyrSnap.push({
-      skills:  p.killcount   | 0,
-      sitems:  p.itemcount   | 0,
-      ssecret: p.secretcount | 0,
-      stime:   leveltime     | 0,
-      in:      playeringame[i] === true,
-    });
-  }
-  const wbs = {
-    didsecret,
-    // epsd and last are 0-biased to match wminfo conventions.
-    epsd:      gameepisode - 1,
-    last:      gamemap - 1,
-    next:      nextMap,
-    maxkills:  totalkills,
-    maxitems:  totalitems,
+  // g_game.c:1064-1130 — snapshot the complete wbstartstruct, including each
+  // player's four frag counters. Intermission code must not read mutable live
+  // level tallies after this point.
+  const wbs = G_BuildIntermissionInfo({
+    gamemode,
+    gameepisode,
+    gamemap,
+    next: nextMap,
+    maxkills: totalkills,
+    maxitems: totalitems,
     maxsecret: totalsecret,
-    plyr:      plyrSnap,
-    pnum:      consoleplayer,
-  };
+    leveltime,
+    consoleplayer,
+    players,
+    playeringame,
+  });
+  doomstat.set_wminfo(wbs);
   set_gamestate(gamestate_t.GS_INTERMISSION);
   doomstat.set_viewactive(false);
   doomstat.set_automapactive(false);

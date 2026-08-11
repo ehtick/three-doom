@@ -369,9 +369,11 @@ export function P_SetupLevel(episode, map, _playermask, _skill) {
   set_totalkills(0);
   set_totalitems(0);
   set_totalsecret(0);
-  // wminfo.partime default — overwritten by g_game's pars[][] table when
-  // available. 180 matches the C default for E1/2/3.
-  if (wminfo !== null) wminfo.partime = 180;
+  // p_setup.c:594-595 — defaults overwritten by G_DoCompleted.
+  if (wminfo !== null) {
+    wminfo.maxfrags = 0;
+    wminfo.partime = 180;
+  }
   // Reset per-player level counters and force a viewz refresh on first frame.
   for (let i = 0; i < MAXPLAYERS; i++) {
     const p = players[i];
