@@ -88,6 +88,7 @@ function updateContrib(c) {
       anchorY = c.dontPegBottom ? fc : bf;
       break;
     case 'middle-front':
+    case 'middle-back':
       zBottom = Math.max(ff, bf); zTop = Math.min(fc, bc);
       anchorY = c.dontPegBottom ? (Math.max(ff, bf) + c.texH) : Math.min(fc, bc);
       break;
@@ -159,9 +160,9 @@ export function R_BuildWalls(scene) {
   // frontFacing = true → triangle winding makes the normal point toward the
   // Doom-front side of the linedef (FrontSide material then renders the wall
   // only to viewers in the front sector). frontFacing = false → normal points
-  // toward Doom-back, visible only from the back sector. Both layouts keep
-  // the same vertex/UV order (u0 at v1, u1 at v2), so each sidedef's
-  // textureoffset anchors correctly.
+  // toward Doom-back, visible only from the back sector. A side-0 seg runs
+  // linedef v1->v2, while side 1 runs v2->v1, so the back UVs reverse too:
+  // each sidedef's textureoffset starts at its own seg v1.
   // Returns { bucket, baseIdx } for the pushed quad, or null if skipped.
   // switchSlot/switchLine (optional) mark a front-side switch surface: it gets
   // its own private bucket and is recorded in _switchWalls for runtime swapping.
@@ -195,7 +196,11 @@ export function R_BuildWalls(scene) {
     const u0 = uOffset / tex.width;
     const u1 = (uOffset + length) / tex.width;
     const { vBottom, vTop } = uvFromAnchor(anchorY, rowoffset, zTop, zBottom, tex.height);
-    b.uvs.push(u0, vBottom, u1, vBottom, u1, vTop, u0, vTop);
+    if (frontFacing === true) {
+      b.uvs.push(u0, vBottom, u1, vBottom, u1, vTop, u0, vTop);
+    } else {
+      b.uvs.push(u1, vBottom, u0, vBottom, u0, vTop, u1, vTop);
+    }
     const light = lightlevel / 255;
     for (let i = 0; i < 4; i++) b.colors.push(light, light, light);
     if (frontFacing === true) {
@@ -335,6 +340,25 @@ export function R_BuildWalls(scene) {
             attachContrib(front, c); attachContrib(back, c);
           }
         }
+        // Side 1 has its own masked middle texture. Keep it front-sided with
+        // back-facing winding; showing side 0 DoubleSide would substitute the
+        // wrong sidedef (and mirror its artwork) when viewed from this sector.
+        if (sd1.midtexture > 0) {
+          const yBottom = Math.max(frontFloor, backFloor);
+          const yTop    = Math.min(frontCeiling, backCeiling);
+          if (yTop > yBottom) {
+            const texH = _texH(sd1.midtexture);
+            const anchor = dontPegBottom ? (yBottom + texH) : yTop;
+            const r = pushQuad(maskedBuckets, sd1.midtexture, x1, y1, x2, y2, yBottom, yTop,
+              sd1.textureoffset / 65536, anchor, sd1.rowoffset / 65536, backLight, false);
+            if (r !== null) {
+              const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
+                kind: 'middle-back', rowoffset: sd1.rowoffset/65536, texH,
+                dontPegTop, dontPegBottom, lightSector: back, contrast };
+              attachContrib(front, c); attachContrib(back, c);
+            }
+          }
+        }
       }
     }
   }
@@ -355,10 +379,11 @@ export function R_BuildWalls(scene) {
       const map = R_GetWallTexture(texnum);
       // Custom Doom shader: paletted texture + COLORMAP remap + distance-
       // fade lighting (r_shader.js). Masked midtextures (grates / fences)
-      // run the same shader with masked=true (discards alpha=0 pixels) and
-      // DoubleSide so vanilla's two-sided masked rendering matches.
+      // run the same shader with masked=true (discards alpha=0 pixels). Each
+      // sidedef contributes its own front-facing quad, matching the directed
+      // seg that vanilla renders from that sector.
       const mat = R_MakeDoomMaterial(map, {
-        masked, side: masked ? THREE.DoubleSide : THREE.FrontSide,
+        masked, side: THREE.FrontSide,
       });
       const mesh = new THREE.Mesh(g, mat);
       mesh.frustumCulled = false;
