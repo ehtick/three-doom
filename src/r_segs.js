@@ -66,6 +66,17 @@ function uvFromAnchor(anchorY, rowoffset, zTop, zBottom, texH) {
   return { vTop: (a - zTop) / texH, vBottom: (a - zBottom) / texH };
 }
 
+// Masked middle textures are patch columns, not vertically tiled walls.
+// Clip the portal opening to the single texture-height interval that vanilla's
+// dc_texturemid positions; space outside this interval remains transparent.
+function clippedMaskedSpan(openingBottom, openingTop, anchorY, rowoffset, texH) {
+  const textureTop = anchorY + rowoffset;
+  return {
+    zBottom: Math.max(openingBottom, textureTop - texH),
+    zTop: Math.min(openingTop, textureTop),
+  };
+}
+
 // Recompute the four-vertex quad in place when its driving sector heights change.
 function updateContrib(c) {
   if (c.bucket === undefined || c.bucket.mesh === undefined) return;
@@ -89,8 +100,22 @@ function updateContrib(c) {
       break;
     case 'middle-front':
     case 'middle-back':
-      zBottom = Math.max(ff, bf); zTop = Math.min(fc, bc);
-      anchorY = c.dontPegBottom ? (Math.max(ff, bf) + c.texH) : Math.min(fc, bc);
+      {
+        const openingBottom = Math.max(ff, bf);
+        const openingTop = Math.min(fc, bc);
+        anchorY = c.dontPegBottom ? (openingBottom + c.texH) : openingTop;
+        const span = clippedMaskedSpan(openingBottom, openingTop,
+          anchorY, c.rowoffset, c.texH);
+        if (span.zTop > span.zBottom) {
+          zBottom = span.zBottom;
+          zTop = span.zTop;
+        } else {
+          // A moving sector can close the opening or move the texture wholly
+          // outside it. Collapse the existing quad instead of leaving stale
+          // repeated geometry behind.
+          zBottom = zTop = openingBottom;
+        }
+      }
       break;
     case 'upper-back':
       zBottom = fc; zTop = Math.max(fc, bc);
@@ -301,13 +326,18 @@ export function R_BuildWalls(scene) {
         if (yTop > yBottom) {
           const texH = _texH(sd0.midtexture);
           const anchor = dontPegBottom ? (yBottom + texH) : yTop;
-          const r = pushQuad(maskedBuckets, sd0.midtexture, x1, y1, x2, y2, yBottom, yTop,
-            sd0.textureoffset / 65536, anchor, sd0.rowoffset / 65536, baseLight, true, middle, li);
-          if (r !== null) {
-            const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
-              kind: 'middle-front', rowoffset: sd0.rowoffset/65536, texH,
-              dontPegTop, dontPegBottom, lightSector: front, contrast };
-            attachContrib(front, c); attachContrib(back, c);
+          const rowoffset = sd0.rowoffset / 65536;
+          const span = clippedMaskedSpan(yBottom, yTop, anchor, rowoffset, texH);
+          if (span.zTop > span.zBottom) {
+            const r = pushQuad(maskedBuckets, sd0.midtexture, x1, y1, x2, y2,
+              span.zBottom, span.zTop, sd0.textureoffset / 65536, anchor,
+              rowoffset, baseLight, true, middle, li);
+            if (r !== null) {
+              const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
+                kind: 'middle-front', rowoffset, texH,
+                dontPegTop, dontPegBottom, lightSector: front, contrast };
+              attachContrib(front, c); attachContrib(back, c);
+            }
           }
         }
       }
@@ -348,13 +378,18 @@ export function R_BuildWalls(scene) {
           if (yTop > yBottom) {
             const texH = _texH(sd1.midtexture);
             const anchor = dontPegBottom ? (yBottom + texH) : yTop;
-            const r = pushQuad(maskedBuckets, sd1.midtexture, x1, y1, x2, y2, yBottom, yTop,
-              sd1.textureoffset / 65536, anchor, sd1.rowoffset / 65536, backLight, false);
-            if (r !== null) {
-              const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
-                kind: 'middle-back', rowoffset: sd1.rowoffset/65536, texH,
-                dontPegTop, dontPegBottom, lightSector: back, contrast };
-              attachContrib(front, c); attachContrib(back, c);
+            const rowoffset = sd1.rowoffset / 65536;
+            const span = clippedMaskedSpan(yBottom, yTop, anchor, rowoffset, texH);
+            if (span.zTop > span.zBottom) {
+              const r = pushQuad(maskedBuckets, sd1.midtexture, x1, y1, x2, y2,
+                span.zBottom, span.zTop, sd1.textureoffset / 65536, anchor,
+                rowoffset, backLight, false);
+              if (r !== null) {
+                const c = { bucket: r.bucket, baseIdx: r.baseIdx, front, back,
+                  kind: 'middle-back', rowoffset, texH,
+                  dontPegTop, dontPegBottom, lightSector: back, contrast };
+                attachContrib(front, c); attachContrib(back, c);
+              }
             }
           }
         }
