@@ -221,7 +221,7 @@ export function R_RegisterMobjSprite(mobj) {
   // first update; R_UpdateSprites supplies its indexed map immediately.
   const mat = R_MakeDoomSpriteMaterial(null, {
     alphaCutoff: SPRITE_ALPHATEST,
-    shadowTint: SHADOW_TINT,
+    shadowPaletteIndex: SHADOW_PALETTE_INDEX,
   });
   const sprite = new THREE.Sprite(mat);
   // WebGLRenderer only copies Sprite.center automatically for SpriteMaterial.
@@ -246,7 +246,7 @@ const FF_FRAMEMASK  = 0x7fff;
 // approximate it with a dark, semi-transparent billboard that flickers and
 // jitters each frame (see R_UpdateSprites).
 const MF_SHADOW      = 0x40000;
-const SHADOW_TINT    = 0.12; // near-black silhouette (fuzz samples a dark colormap)
+const SHADOW_PALETTE_INDEX = 5; // PLAYPAL 0: (27,27,27), near the old 0.12 tint
 const SHADOW_OPACITY = 0.33; // base translucency
 const SHADOW_FLICKER = 0.09; // +/- per-frame opacity shimmer
 const SHADOW_JITTER  = 1.5;  // vertical position shimmer, in map units

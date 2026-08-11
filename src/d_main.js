@@ -2,8 +2,9 @@
 // DOOM main program (D_DoomMain) and game loop (D_DoomLoop).
 
 import { I_Init, I_GetTime, I_Error } from './i_system.js';
-import { I_InitGraphics, I_SetPalette, I_FinishUpdate, I_RenderTint, renderer, scene, camera } from './i_video.js';
+import { I_InitGraphics, I_SetPalette, I_SetPaletteIndex, I_FinishUpdate, renderer, scene, camera } from './i_video.js';
 import { V_Init, V_DrawPatch, screens, patch_t } from './v_video.js';
+import { V_PaletteCSS } from './v_palette.js';
 import { W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum } from './w_wad.js';
 import { M_CheckParm, myargv, myargc } from './m_argv.js';
 import { M_LoadDefaults } from './m_misc.js';
@@ -131,6 +132,7 @@ export function D_StartTitle() {
 
 // Overlay canvas + 2D context — looked up once and reused.
 let _overlayCanvas = null, _overlayCtx = null;
+let _oldDisplayGameState = -1;
 function getOverlay() {
   if (_overlayCanvas === null) {
     _overlayCanvas = document.getElementById('overlay');
@@ -140,6 +142,13 @@ function getOverlay() {
 }
 
 function D_Display() {
+  // d_main.c:273-275 — leaving the level restores PLAYPAL 0. Otherwise a
+  // last-tic damage/bonus/radsuit palette can leak into intermission/finale.
+  if (gamestate !== _oldDisplayGameState && gamestate !== gamestate_t.GS_LEVEL) {
+    I_SetPaletteIndex(0);
+  }
+  _oldDisplayGameState = gamestate;
+
   if (gamestate === gamestate_t.GS_DEMOSCREEN) {
     D_PageDrawer();
     if (renderer !== null) renderer.render(scene, camera);
@@ -163,7 +172,6 @@ function D_Display() {
     if (_updateSky !== null) _updateSky();
     if (renderer !== null) {
       renderer.render(scene, camera);
-      I_RenderTint(); // palette flash quad (damage / pickup / radsuit)
     }
     // Overlay: weapon view-sprite (HUD/status to come).
     const o = getOverlay();
@@ -228,7 +236,7 @@ function D_Display() {
     const o = getOverlay();
     const cw = _overlayCanvas.width, ch = _overlayCanvas.height;
     o.imageSmoothingEnabled = false;
-    o.fillStyle = '#000';
+    o.fillStyle = V_PaletteCSS(0);
     o.fillRect(0, 0, cw, ch);
     if (_fDrawer !== null) {
       const scale = Math.min(cw / 320, ch / 200);

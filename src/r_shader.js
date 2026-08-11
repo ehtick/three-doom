@@ -16,14 +16,21 @@ import * as THREE from 'three';
 // Singletons — built lazily from the WAD's PLAYPAL + COLORMAP lumps.
 let _paletteTex = null;
 let _colormapTex = null;
+let _playpalRGBA = null;
+let _paletteIndex = 0;
 
-// PLAYPAL has 14 palettes (256 RGB each); pal 0 is the normal one.
-// PLAYPAL palette swaps for damage / pickup / radsuit are handled at the
-// overlay level (I_RenderTint in i_video.js) and don't change this texture.
-function _buildPaletteTexture(playpal_rgba) {
+// PLAYPAL has 14 palettes (256 RGB each); palette selection changes the
+// shared upload so every indexed world material resolves through the exact
+// damage, pickup, or radiation-suit palette selected by st_stuff.c.
+function _selectedPalette(playpalRGBA) {
+  const start = _paletteIndex * 256 * 4;
+  return playpalRGBA.slice(start, start + 256 * 4);
+}
+
+function _buildPaletteTexture(playpalRGBA) {
   // Modern Three.js dropped RGBFormat; use RGBA with alpha=255. playpal_rgba
-  // already has alpha=255 in the 14×256×4 layout, so slice the first palette.
-  const rgba = playpal_rgba.slice(0, 256 * 4);
+  // already has alpha=255 in the 14×256×4 layout.
+  const rgba = _selectedPalette(playpalRGBA);
   const tex = new THREE.DataTexture(rgba, 256, 1, THREE.RGBAFormat);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
@@ -51,8 +58,25 @@ function _buildColormapTexture(colormaps) {
 
 // One-time init from r_data.js's loaded PLAYPAL / COLORMAP.
 export function R_ShaderInit(playpal_rgba, colormaps) {
-  if (_paletteTex === null) _paletteTex = _buildPaletteTexture(playpal_rgba);
+  R_SetPlaypal(playpal_rgba);
   if (_colormapTex === null) _colormapTex = _buildColormapTexture(colormaps);
+}
+
+export function R_SetPlaypal(playpalRGBA) {
+  _playpalRGBA = playpalRGBA;
+  if (_paletteTex === null) {
+    _paletteTex = _buildPaletteTexture(_playpalRGBA);
+    return;
+  }
+  _paletteTex.image.data.set(_selectedPalette(_playpalRGBA));
+  _paletteTex.needsUpdate = true;
+}
+
+export function R_SetPaletteIndex(index) {
+  _paletteIndex = Number.isInteger(index) && index >= 0 && index < 14 ? index : 0;
+  if (_paletteTex === null || _playpalRGBA === null) return;
+  _paletteTex.image.data.set(_selectedPalette(_playpalRGBA));
+  _paletteTex.needsUpdate = true;
 }
 
 // Exposed so the sky shader can reuse the same GPU uploads instead of
@@ -234,7 +258,7 @@ uniform bool fullbright;
 uniform bool shadow;
 uniform float opacity;
 uniform float alphaCutoff;
-uniform float shadowTint;
+uniform float shadowPaletteIndex;
 
 varying vec2 vUv;
 varying float vViewDepth;
@@ -245,7 +269,8 @@ void main() {
   if (alpha < alphaCutoff) discard;
 
   if (shadow) {
-    gl_FragColor = vec4(vec3(shadowTint), alpha);
+    vec3 shadowRgb = texture2D(palette, vec2(shadowPaletteIndex, 0.5)).rgb;
+    gl_FragColor = vec4(shadowRgb, alpha);
     return;
   }
 
@@ -268,7 +293,7 @@ void main() {
 }
 `;
 
-export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowTint = 0.12 } = {}) {
+export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowPaletteIndex = 5 } = {}) {
   if (_paletteTex === null || _colormapTex === null) {
     throw new Error('R_MakeDoomSpriteMaterial called before R_ShaderInit');
   }
@@ -284,7 +309,7 @@ export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowTint = 
       shadow:        { value: false },
       opacity:       { value: 1 },
       alphaCutoff:   { value: alphaCutoff },
-      shadowTint:    { value: shadowTint },
+      shadowPaletteIndex: { value: shadowPaletteIndex / 255 },
       center:        { value: new THREE.Vector2(0.5, 0.5) },
       rotation:      { value: 0 },
     },

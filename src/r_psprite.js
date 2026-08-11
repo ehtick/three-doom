@@ -10,21 +10,19 @@
 import { sprnames, states } from './info.js';
 import { sprites } from './r_things.js';
 import { W_CacheLumpNum } from './w_wad.js';
-import { firstspritelump, playpal_rgba } from './r_data.js';
-import { patch_t } from './v_video.js';
+import { firstspritelump } from './r_data.js';
+import { patch_t, V_CreatePaletteCanvasInfo } from './v_video.js';
 import { SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
 
-// Cache of decoded sprite lumps as ImageBitmap so the overlay paint is cheap.
+// Cache source indices, while each canvas lazily follows the active PLAYPAL.
 const _cache = new Map();
 function decodeAsCanvas(lumpIdx) {
   let entry = _cache.get(lumpIdx);
   if (entry !== undefined) return entry;
   const bytes = W_CacheLumpNum(firstspritelump + lumpIdx, 0);
   const p = patch_t(bytes);
-  const c = document.createElement('canvas');
-  c.width = p.width; c.height = p.height;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(p.width, p.height);
+  const indices = new Uint8Array(p.width * p.height);
+  const alphas = new Uint8Array(p.width * p.height);
   for (let col = 0; col < p.width; col++) {
     let colptr = p.columnofs(col);
     while (bytes[colptr] !== 0xff) {
@@ -33,18 +31,14 @@ function decodeAsCanvas(lumpIdx) {
       const src      = colptr + 3;
       for (let i = 0; i < length; i++) {
         const y = topdelta + i;
-        const pal = bytes[src + i] * 4;
-        const off = (y * p.width + col) * 4;
-        img.data[off + 0] = playpal_rgba[pal + 0];
-        img.data[off + 1] = playpal_rgba[pal + 1];
-        img.data[off + 2] = playpal_rgba[pal + 2];
-        img.data[off + 3] = 255;
+        const dst = y * p.width + col;
+        indices[dst] = bytes[src + i];
+        alphas[dst] = 255;
       }
       colptr += length + 4;
     }
   }
-  ctx.putImageData(img, 0, 0);
-  entry = { canvas: c, w: p.width, h: p.height, leftoffset: p.leftoffset, topoffset: p.topoffset };
+  entry = V_CreatePaletteCanvasInfo(indices, alphas, p.width, p.height, p.leftoffset, p.topoffset);
   _cache.set(lumpIdx, entry);
   return entry;
 }

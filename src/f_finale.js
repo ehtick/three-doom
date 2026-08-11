@@ -11,11 +11,12 @@ import {
 } from './doomstat.js';
 import { GameMode_t, gamestate_t } from './doomdef.js';
 import { gameaction_t } from './d_event.js';
-import { V_DecodePatchToCanvas } from './v_video.js';
+import { V_CreatePaletteCanvasInfo, V_DecodePatchToCanvas } from './v_video.js';
+import { V_PaletteCSS } from './v_palette.js';
 import { S_ChangeMusic, S_StartMusic, S_StartSound } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
 import { W_CacheLumpNum, W_CheckNumForName, lumpinfo } from './w_wad.js';
-import { firstspritelump, playpal_rgba } from './r_data.js';
+import { firstspritelump } from './r_data.js';
 import { sprites } from './r_things.js';
 import {
   F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
@@ -103,41 +104,32 @@ export function F_Ticker() {
 const _flatCanvasCache = new Map();
 function getFlatCanvas(name) {
   if (_flatCanvasCache.has(name)) return _flatCanvasCache.get(name);
-  if (typeof document === 'undefined' || playpal_rgba === null) return null;
+  if (typeof document === 'undefined') return null;
   const lumpnum = W_CheckNumForName(name);
   if (lumpnum < 0) { _flatCanvasCache.set(name, null); return null; }
   const bytes = W_CacheLumpNum(lumpnum, 0);
   if (bytes.length < 64 * 64) { _flatCanvasCache.set(name, null); return null; }
-  const tile = document.createElement('canvas');
-  tile.width = 64; tile.height = 64;
-  const tileCtx = tile.getContext('2d');
-  const image = tileCtx.createImageData(64, 64);
-  for (let i = 0; i < 64 * 64; i++) {
-    const pal = bytes[i] * 4;
-    const out = i * 4;
-    image.data[out]     = playpal_rgba[pal];
-    image.data[out + 1] = playpal_rgba[pal + 1];
-    image.data[out + 2] = playpal_rgba[pal + 2];
-    image.data[out + 3] = 255;
+  const indices = new Uint8Array(320 * 200);
+  const alphas = new Uint8Array(320 * 200);
+  alphas.fill(255);
+  for (let y = 0; y < 200; y++) {
+    for (let x = 0; x < 320; x++) {
+      indices[y * 320 + x] = bytes[(y & 63) * 64 + (x & 63)];
+    }
   }
-  tileCtx.putImageData(image, 0, 0);
-  const screen = document.createElement('canvas');
-  screen.width = 320; screen.height = 200;
-  const screenCtx = screen.getContext('2d');
-  screenCtx.fillStyle = screenCtx.createPattern(tile, 'repeat');
-  screenCtx.fillRect(0, 0, 320, 200);
-  _flatCanvasCache.set(name, screen);
-  return screen;
+  const info = V_CreatePaletteCanvasInfo(indices, alphas, 320, 200);
+  _flatCanvasCache.set(name, info);
+  return info;
 }
 
 function F_TextWrite(ctx, dx, dy, dw, dh) {
   const background = getFlatCanvas(_finaleFlat);
-  if (background !== null) ctx.drawImage(background, dx, dy, dw, dh);
-  else { ctx.fillStyle = '#000'; ctx.fillRect(dx, dy, dw, dh); }
+  if (background !== null) ctx.drawImage(background.canvas, dx, dy, dw, dh);
+  else { ctx.fillStyle = V_PaletteCSS(0); ctx.fillRect(dx, dy, dw, dh); }
   const sx = dw / 320, sy = dh / 200;
   const lineH = 11 * sy;
   ctx.font = `bold ${lineH}px monospace`;
-  ctx.fillStyle = '#ffcf00';
+  ctx.fillStyle = V_PaletteCSS(256 - 32 + 7);
   ctx.textAlign = 'left';
   // f_finale.c:F_TextWrite — `count = (finalecount - 10) / TEXTSPEED`
   // characters revealed so far. Clamped to text length.
@@ -162,7 +154,7 @@ function F_BunnyScroll(ctx, dx, dy, dw, dh) {
   if (scrolled < 0)   scrolled = 0;
   // Composite: 320-pixel-wide viewport sourced from p1 (cols 0..320-scrolled-1)
   // followed by p2 (cols 0..scrolled-1). Pillarbox black if absent.
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = V_PaletteCSS(0);
   ctx.fillRect(dx, dy, dw, dh);
   if (p1 !== null) {
     const visW = 320 - scrolled;
@@ -193,7 +185,7 @@ export function F_Drawer(ctx, dx, dy, dw, dh) {
   // Stage 1: still picture (or bunny scroll for E3).
   if (gameepisode === 3) { F_BunnyScroll(ctx, dx, dy, dw, dh); return; }
   const sx = dw / 320, sy = dh / 200;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = V_PaletteCSS(0);
   ctx.fillRect(dx, dy, dw, dh);
   const patchName = F_GetDoom1ArtPatch(gamemode, gameepisode);
   const pic = patchName === null ? null : getPatch(patchName);
@@ -229,14 +221,14 @@ export function F_CastResponder(ev) {
 export function F_CastDrawer(ctx, dx, dy, dw, dh) {
   if (!_castActive || _cast === null) return;
   const sx = dw / 320, sy = dh / 200;
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = V_PaletteCSS(0);
   ctx.fillRect(dx, dy, dw, dh);
   // Background — use BOSSBACK if present (Doom 2 only), else solid.
   const bg = getPatch('BOSSBACK');
   if (bg !== null) ctx.drawImage(bg.canvas, dx, dy, bg.w * sx, bg.h * sy);
   // Monster name as a centred label.
   const cast = F_GetCastDisplay(_cast);
-  ctx.fillStyle = '#ffcf00';
+  ctx.fillStyle = V_PaletteCSS(256 - 32 + 7);
   ctx.font = `bold ${Math.round(dh * 0.06)}px monospace`;
   ctx.textAlign = 'center';
   ctx.fillText(cast.name, dx + dw * 0.5, dy + dh * 0.92);

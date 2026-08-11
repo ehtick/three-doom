@@ -5,6 +5,7 @@
 import { players, consoleplayer } from './doomstat.js';
 import { weapontype_t, ammotype_t } from './doomdef.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
+import { V_PaletteCSS } from './v_palette.js';
 import { M_Random } from './m_random.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
@@ -304,7 +305,7 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   if (stbar !== null) {
     overlayCtx.drawImage(stbar.canvas, dstX, barY, 320 * sx, 32 * sy);
   } else {
-    overlayCtx.fillStyle = '#404040';
+    overlayCtx.fillStyle = V_PaletteCSS(6 * 16 + 8);
     overlayCtx.fillRect(dstX, barY, dstW, 32 * sy);
   }
   // 2) AMMO — right-aligned at x=44 (3-digit width).

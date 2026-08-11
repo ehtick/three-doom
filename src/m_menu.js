@@ -21,6 +21,7 @@ import { sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sou
 import { HU_ToggleMessages, showMessages } from './hu_stuff.js';
 import { D_AcquirePointerLock } from './d_keyboard.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas, V_RegisterPNGPatch } from './v_video.js';
+import { V_PaletteCSS } from './v_palette.js';
 const getPatch = V_DecodePatchToCanvas;
 
 // M_CONT isn't a WAD lump; it's a user-supplied PNG in the project root for
@@ -452,7 +453,7 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   _lastLayout = { lx, ly, sx, sy };
   // Background dim only when not over title screen.
   if (gamestate === 0 /*GS_LEVEL*/) {
-    overlayCtx.fillStyle = 'rgba(0,0,0,0.6)';
+    overlayCtx.fillStyle = V_PaletteCSS(0, 0.6);
     overlayCtx.fillRect(dstX, dstY, dstW, dstH);
   }
   if (m.fullscreen) {
@@ -482,7 +483,7 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     if (p !== null) {
       drawPatchAt(overlayCtx, p, ix, iy, sx, sy);
     } else if (it.label) {
-      overlayCtx.fillStyle = '#cccccc';
+      overlayCtx.fillStyle = V_PaletteCSS(6 * 16 + 8);
       overlayCtx.font = `bold ${Math.round(12 * sy)}px monospace`;
       overlayCtx.textAlign = 'left';
       overlayCtx.fillText(it.label, ix, iy + 12 * sy);
@@ -496,7 +497,7 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     drawPatchAt(overlayCtx, cur, cx, cy, sx, sy);
   } else {
     // Fallback ">" marker.
-    overlayCtx.fillStyle = '#ff8';
+    overlayCtx.fillStyle = V_PaletteCSS(256 - 32 + 7);
     overlayCtx.font = `bold ${Math.round(14 * sy)}px monospace`;
     overlayCtx.fillText('►', lx + (baseX - 16) * sx, ly + (baseY + 12 + _selected * LINE_HEIGHT) * sy);
   }
@@ -505,9 +506,9 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
 }
 
 function drawMessage(ctx, dstX, dstY, dstW, dstH) {
-  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillStyle = V_PaletteCSS(0, 0.85);
   ctx.fillRect(dstX, dstY, dstW, dstH);
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = V_PaletteCSS(256 - 47);
   ctx.font = `bold ${Math.round(dstH * 0.035)}px monospace`;
   ctx.textAlign = 'center';
   const lines = _message.text.split('\n');

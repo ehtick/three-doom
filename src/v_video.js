@@ -5,7 +5,10 @@ import { SCREENWIDTH, SCREENHEIGHT, RANGECHECK } from './doomdef.js';
 import { I_Error, I_AllocLow } from './i_system.js';
 import { M_AddToBox } from './m_bbox.js';
 import { W_CheckNumForName, W_CacheLumpNum } from './w_wad.js';
-import { playpal_rgba } from './r_data.js';
+import {
+  V_FindClosestBasePaletteIndex, V_GetActivePalette, V_GetPaletteRevision,
+  V_IsPlaypalReady,
+} from './v_palette.js';
 
 // ----- patch_t accessor -----
 // In C, patch_t is a struct overlaid onto raw lump bytes. In JS we wrap the
@@ -262,9 +265,44 @@ export function V_GetBlock(x, y, scrn, width, height, dest) {
   }
 }
 
-// V_DecodePatchToCanvas — decode a WAD patch lump to an off-screen Canvas
-// once and cache it. Returns `{ canvas, w, h, leftoffset, topoffset }` or
-// null if the lump is missing.
+// Build a Canvas-backed view of indexed pixels. The canvas property is a
+// getter so callers may cache the info object while palette changes still
+// recolor the next draw. This is shared by patches, flats, and psprites.
+export function V_CreatePaletteCanvasInfo(indices, alphas, w, h, leftoffset = 0, topoffset = 0) {
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const image = ctx.createImageData(w, h);
+  let renderedRevision = -1;
+
+  const info = { w, h, leftoffset, topoffset };
+  Object.defineProperty(info, 'canvas', {
+    enumerable: true,
+    get() {
+      const revision = V_GetPaletteRevision();
+      if (renderedRevision !== revision) {
+        const palette = V_GetActivePalette();
+        for (let i = 0; i < indices.length; i++) {
+          const src = indices[i] * 4;
+          const dst = i * 4;
+          image.data[dst + 0] = palette[src + 0];
+          image.data[dst + 1] = palette[src + 1];
+          image.data[dst + 2] = palette[src + 2];
+          image.data[dst + 3] = alphas[i];
+        }
+        ctx.putImageData(image, 0, 0);
+        renderedRevision = revision;
+      }
+      return canvas;
+    },
+  });
+  return info;
+}
+
+// V_DecodePatchToCanvas — decode a WAD patch lump to indexed pixels once and
+// cache it. Returns `{ canvas, w, h, leftoffset, topoffset }` or null if the
+// lump is missing; `canvas` recolors lazily when PLAYPAL selection changes.
 const _patchCanvasCache = new Map();
 // External PNG files registered as patches (e.g. UI graphics that aren't in
 // the WAD). Lookup wins over the WAD path so callers don't need to know.
@@ -278,8 +316,39 @@ export function V_RegisterPNGPatch(name, url, leftoffset = 0, topoffset = 0) {
   img.onload = () => {
     const c = document.createElement('canvas');
     c.width = img.naturalWidth; c.height = img.naturalHeight;
-    c.getContext('2d').drawImage(img, 0, 0);
-    _pngOverrides.set(name, { canvas: c, w: c.width, h: c.height, leftoffset, topoffset });
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    let indexedInfo = null;
+    const info = { w: c.width, h: c.height, leftoffset, topoffset };
+    Object.defineProperty(info, 'canvas', {
+      enumerable: true,
+      get() {
+        // m_menu.js may load before D_DoomMain publishes PLAYPAL. Preserve
+        // the source temporarily, then quantize exactly once against palette 0.
+        if (!V_IsPlaypalReady()) return c;
+        if (indexedInfo === null) {
+          const source = ctx.getImageData(0, 0, c.width, c.height).data;
+          const indices = new Uint8Array(c.width * c.height);
+          const alphas = new Uint8Array(c.width * c.height);
+          const nearest = new Map();
+          for (let i = 0; i < indices.length; i++) {
+            const src = i * 4;
+            alphas[i] = source[src + 3];
+            if (alphas[i] === 0) continue;
+            const key = (source[src + 0] << 16) | (source[src + 1] << 8) | source[src + 2];
+            let index = nearest.get(key);
+            if (index === undefined) {
+              index = V_FindClosestBasePaletteIndex(source[src + 0], source[src + 1], source[src + 2]);
+              nearest.set(key, index);
+            }
+            indices[i] = index;
+          }
+          indexedInfo = V_CreatePaletteCanvasInfo(indices, alphas, c.width, c.height, leftoffset, topoffset);
+        }
+        return indexedInfo.canvas;
+      },
+    });
+    _pngOverrides.set(name, info);
   };
   img.onerror = () => {
     console.warn(`V_RegisterPNGPatch: failed to load "${name}" from ${url}`);
@@ -294,28 +363,22 @@ export function V_DecodePatchToCanvas(name) {
   if (lumpNum === -1) { _patchCanvasCache.set(name, null); return null; }
   const bytes = W_CacheLumpNum(lumpNum, 0);
   const p = patch_t(bytes);
-  const c = document.createElement('canvas');
-  c.width = p.width; c.height = p.height;
-  const ctx = c.getContext('2d');
-  const img = ctx.createImageData(p.width, p.height);
+  const indices = new Uint8Array(p.width * p.height);
+  const alphas = new Uint8Array(p.width * p.height);
   for (let col = 0; col < p.width; col++) {
     let cp = p.columnofs(col);
     while (bytes[cp] !== 0xff) {
       const top = bytes[cp], len = bytes[cp + 1], src = cp + 3;
       for (let i = 0; i < len; i++) {
         const yy = top + i;
-        const pal = bytes[src + i] * 4;
-        const off = (yy * p.width + col) * 4;
-        img.data[off + 0] = playpal_rgba[pal + 0];
-        img.data[off + 1] = playpal_rgba[pal + 1];
-        img.data[off + 2] = playpal_rgba[pal + 2];
-        img.data[off + 3] = 255;
+        const dst = yy * p.width + col;
+        indices[dst] = bytes[src + i];
+        alphas[dst] = 255;
       }
       cp += len + 4;
     }
   }
-  ctx.putImageData(img, 0, 0);
-  const info = { canvas: c, w: p.width, h: p.height, leftoffset: p.leftoffset, topoffset: p.topoffset };
+  const info = V_CreatePaletteCanvasInfo(indices, alphas, p.width, p.height, p.leftoffset, p.topoffset);
   _patchCanvasCache.set(name, info);
   return info;
 }

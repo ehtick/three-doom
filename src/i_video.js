@@ -13,6 +13,11 @@ import * as THREE from 'three';
 import { SCREENWIDTH, SCREENHEIGHT, KEY_LEFTARROW, KEY_RIGHTARROW, KEY_UPARROW, KEY_DOWNARROW, KEY_ESCAPE, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_PAUSE, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_RSHIFT, KEY_RCTRL, KEY_RALT } from './doomdef.js';
 import { evtype_t, D_PostEvent } from './d_event.js';
 import { screens } from './v_video.js';
+import {
+  V_GetActivePalette, V_InitPlaypal, V_IsPlaypalReady,
+  V_PaletteCSS, V_SetPaletteIndex,
+} from './v_palette.js';
+import { R_SetPaletteIndex, R_SetPlaypal } from './r_shader.js';
 
 // ---------- Three.js setup ----------
 export let renderer = null;
@@ -32,8 +37,6 @@ function doomVerticalFov(aspect) {
 let overlayCanvas = null;
 let overlayCtx    = null;
 let rgbaBuffer    = null;          // ImageData for paletted-screen blits
-let palette       = null;          // 256*4 RGBA bytes (current palette)
-const palette14   = new Uint8Array(14 * 256 * 4); // all 14 palettes, prebuilt
 
 // Cached canvas for upscaling the 320x200 framebuffer.
 let scratchCanvas = null;
@@ -193,77 +196,26 @@ function resize() {
 
 // ---------- Palette ----------
 
-// Takes a 768-byte PLAYPAL chunk (RGB triplets for 256 colors) and stores it.
-// Doom's PLAYPAL lump holds 14 such palettes back-to-back (3584 bytes).
-// We accept either form: a single palette (768 bytes) sets palette index 0,
-// while a full PLAYPAL (3584 bytes) populates all 14.
+// Takes one 768-byte RGB palette or PLAYPAL's complete 14-palette lump and
+// publishes it to both the Canvas and WebGL indexed renderers.
 export function I_SetPalette(rgbBytes) {
-  if (rgbBytes.length === 768) {
-    palette = palettize(rgbBytes);
-  } else if (rgbBytes.length >= 14 * 768) {
-    for (let p = 0; p < 14; p++) {
-      const dst = palette14.subarray(p * 256 * 4);
-      const src = rgbBytes.subarray(p * 768, (p + 1) * 768);
-      dst.set(palettize(src));
-    }
-    palette = palette14.subarray(0, 256 * 4);
-  } else {
-    // Partial — interpret what we have as a single palette.
-    palette = palettize(rgbBytes);
-  }
+  R_SetPlaypal(V_InitPlaypal(rgbBytes));
+  I_SetPaletteIndex(0);
 }
 
-function palettize(rgb) {
-  const out = new Uint8Array(256 * 4);
-  for (let i = 0; i < 256; i++) {
-    out[i * 4 + 0] = rgb[i * 3 + 0];
-    out[i * 4 + 1] = rgb[i * 3 + 1];
-    out[i * 4 + 2] = rgb[i * 3 + 2];
-    out[i * 4 + 3] = 255;
-  }
-  return out;
-}
-
-// Fullscreen tint quad — driven by I_SetPaletteIndex. Rendered with an
-// OrthographicCamera over the main scene; pure WebGL, no DOM filters.
-let _tintScene = null, _tintCamera = null, _tintMat = null;
-function ensureTintQuad() {
-  if (_tintScene !== null) return;
-  _tintScene  = new THREE.Scene();
-  _tintCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  _tintMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0, depthTest: false, depthWrite: false });
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), _tintMat);
-  _tintScene.add(mesh);
-}
-function setTint(r, g, b, alpha) {
-  ensureTintQuad();
-  _tintMat.color.setRGB(r, g, b);
-  _tintMat.opacity = alpha;
-}
-// Called from D_Display after the main 3D scene is rendered.
-export function I_RenderTint() {
-  if (_tintScene === null || _tintMat.opacity <= 0 || renderer === null) return;
-  renderer.autoClear = false;
-  renderer.render(_tintScene, _tintCamera);
-  renderer.autoClear = true;
-}
-
-// Switches the active palette to one of the 14 stored in palette14 (used by
-// damage flash, item flash, radiation suit).
+// Switches the whole composed frame to the selected PLAYPAL palette, matching
+// the hardware-palette update in linuxdoom i_video.c.
 export function I_SetPaletteIndex(n) {
-  if (n < 0 || n >= 14) n = 0;
-  palette = palette14.subarray(n * 256 * 4, (n + 1) * 256 * 4);
-  ensureTintQuad();
-  if (n === 0) {
-    setTint(0, 0, 0, 0);
-  } else if (n >= 1 && n <= 8) {       // red damage (PLAYPAL 1..8)
-    const t = n / 8;
-    setTint(1, 0, 0, 0.15 + t * 0.30);
-  } else if (n >= 9 && n <= 12) {      // yellow bonus pickup
-    const t = (n - 8) / 4;
-    setTint(1, 0.85, 0.35, 0.08 + t * 0.10);
-  } else if (n === 13) {                // green radsuit
-    setTint(0.2, 1, 0.2, 0.25);
+  const selected = V_SetPaletteIndex(n);
+  R_SetPaletteIndex(selected);
+
+  // Doom also palette-shifts index 0. Keep the renderer clear and page
+  // letterbox in sync instead of leaving unflashed black around the scene.
+  const background = V_PaletteCSS(0);
+  if (renderer !== null) renderer.setClearColor(background);
+  if (typeof document !== 'undefined') {
+    document.documentElement.style.backgroundColor = background;
+    if (document.body !== null) document.body.style.backgroundColor = background;
   }
 }
 
@@ -275,11 +227,12 @@ export function I_UpdateNoBlit() {}
 // I_FinishUpdate: present the frame. Paint the paletted screen onto the 2D
 // overlay; Three.js renders the 3D world separately (called from R_RenderPlayerView).
 export function I_FinishUpdate() {
-  if (palette === null || overlayCtx === null) return;
+  if (!V_IsPlaypalReady() || overlayCtx === null) return;
 
   // Pal-index -> RGBA into rgbaBuffer.
   const src = screens[0];
   const dst = rgbaBuffer.data;
+  const palette = V_GetActivePalette();
   for (let i = 0, j = 0; i < src.length; i++, j += 4) {
     const p = src[i] * 4;
     dst[j + 0] = palette[p + 0];

@@ -6,6 +6,7 @@
 import { lines, numlines } from './p_setup.js';
 import { players, consoleplayer } from './doomstat.js';
 import { ML_DONTDRAW, ML_SECRET, ML_MAPPED } from './doomdata.js';
+import { V_PaletteCSS } from './v_palette.js';
 
 export let automapactive = false;
 export function set_automapactive(v) { automapactive = v; }
@@ -16,14 +17,14 @@ let _followMode = true;
 
 // am_map.c color classes (AM_drawWalls): one-sided walls are red, teleporter
 // lines mid-red, floor-height changes brown, ceiling-height changes yellow.
-const COLOR_BACKGROUND = '#000000';
-const COLOR_WALL       = '#d40000'; // WALLCOLORS  (REDS)
-const COLOR_TELEPORT   = '#ff6b6b'; // WALLCOLORS + WALLRANGE/2
-const COLOR_FLOORDIFF  = '#a05010'; // FDWALLCOLORS (BROWNS)
-const COLOR_CEILDIFF   = '#e8e800'; // CDWALLCOLORS (YELLOWS)
-const COLOR_PLAYER     = '#ffffff'; // YOURCOLORS  (WHITE)
-const COLOR_GRID       = '#202020'; // GRIDCOLORS  (GRAYS)
-const COLOR_MARK       = '#dcdcdc';
+const COLOR_BACKGROUND = 0;              // BLACK
+const COLOR_WALL       = 256 - 5 * 16;   // WALLCOLORS (REDS)
+const COLOR_TELEPORT   = COLOR_WALL + 8; // WALLCOLORS + WALLRANGE/2
+const COLOR_FLOORDIFF  = 4 * 16;         // FDWALLCOLORS (BROWNS)
+const COLOR_CEILDIFF   = 256 - 32 + 7;   // CDWALLCOLORS (YELLOWS)
+const COLOR_PLAYER     = 256 - 47;        // YOURCOLORS (WHITE)
+const COLOR_GRID       = 6 * 16 + 8;     // GRIDCOLORS (GRAYS + 8)
+const COLOR_MARK       = 103;            // opaque AMMNUM patch pixel index
 
 // am_map.c:AM_NUMMARKPOINTS — player-placed map markers. x === -1 means empty.
 const AM_NUMMARKPOINTS = 10;
@@ -83,7 +84,7 @@ export function AM_Responder(ev) {
 
 export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   if (!automapactive) return;
-  overlayCtx.fillStyle = COLOR_BACKGROUND;
+  overlayCtx.fillStyle = V_PaletteCSS(COLOR_BACKGROUND);
   overlayCtx.fillRect(dstX, dstY, dstW, dstH);
 
   const cx = dstX + dstW * 0.5;
@@ -95,7 +96,7 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
 
   // Grid.
-  overlayCtx.strokeStyle = COLOR_GRID;
+  overlayCtx.strokeStyle = V_PaletteCSS(COLOR_GRID);
   overlayCtx.lineWidth = 1;
   overlayCtx.beginPath();
   const grid = 128;
@@ -144,7 +145,7 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     b.push(li);
   }
   for (const [color, list] of buckets) {
-    overlayCtx.strokeStyle = color;
+    overlayCtx.strokeStyle = V_PaletteCSS(color);
     overlayCtx.beginPath();
     for (const li of list) {
       const [x1, y1] = project(li.v1.x / 65536, li.v1.y / 65536);
@@ -161,7 +162,7 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     const [px, py] = project(p.mo.x / 65536, p.mo.y / 65536);
     const angle = (p.mo.angle >>> 0) / 0x100000000 * Math.PI * 2;
     const r = 12;
-    overlayCtx.strokeStyle = COLOR_PLAYER;
+    overlayCtx.strokeStyle = V_PaletteCSS(COLOR_PLAYER);
     overlayCtx.lineWidth = 2;
     overlayCtx.beginPath();
     overlayCtx.moveTo(px + Math.cos(angle) * r, py - Math.sin(angle) * r);
@@ -172,7 +173,7 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
 
   // Player-placed marks (am_map.c:AM_drawMarks).
-  overlayCtx.fillStyle = COLOR_MARK;
+  overlayCtx.fillStyle = V_PaletteCSS(COLOR_MARK);
   overlayCtx.font = 'bold 10px monospace';
   overlayCtx.textAlign = 'center';
   overlayCtx.textBaseline = 'middle';

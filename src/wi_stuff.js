@@ -21,6 +21,7 @@ import { S_StartSound, S_ChangeMusic } from './s_sound.js';
 import { M_Random } from './m_random.js';
 import { mus_inter, mus_dm2int, sfx_pistol, sfx_barexp, sfx_sgcock } from './sounds.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
+import { V_PaletteCSS } from './v_palette.js';
 
 // ----------------------------------------------------------------------------
 // Par-time tables (g_game.c:978/987). Vanilla stores these in g_game and bakes
@@ -205,7 +206,7 @@ function drawPatch(info, vx, vy) {
 // framebuffer. Here we fill the letterbox black then blit the full-screen
 // background patch.
 function WI_slamBackground() {
-  _ctx.fillStyle = '#000';
+  _ctx.fillStyle = V_PaletteCSS(0);
   _ctx.fillRect(_ox, _oy, SCREENWIDTH * _sx, SCREENHEIGHT * _sy);
   drawPatch(bg, 0, 0);
 }
@@ -688,4 +689,3 @@ export function WI_Start(wbstartstruct, onDone) {
   WI_initStats(); // single-player
   _active = true;
 }
-
