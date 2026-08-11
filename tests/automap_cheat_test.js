@@ -1,4 +1,5 @@
 import {
+  AM_CROSSHAIR_COLOR,
   AM_CheatPlayerSegments,
   AM_GetCheatLevel,
   AM_LineColorForMode,
@@ -111,6 +112,7 @@ Deno.test('IDDT reveal modes follow AM_drawWalls visibility and color rules', ()
 
 Deno.test('thing and IDDT arrow geometry use exact fixed-point line characters', () => {
   assertEquals(AM_THING_COLOR, 112, 'thing color');
+  assertEquals(AM_CROSSHAIR_COLOR, 96, 'crosshair color');
   const originX = 100 * FRACUNIT;
   const originY = -50 * FRACUNIT;
   assertDeepEquals(

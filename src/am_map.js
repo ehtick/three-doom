@@ -68,6 +68,7 @@ export const AM_THING_COLOR = 7 * 16;    // THINGCOLORS (GREENS)
 const COLOR_PLAYER     = 256 - 47;        // YOURCOLORS (WHITE)
 const COLOR_GRID       = 6 * 16 + 8;     // GRIDCOLORS (GRAYS + 8)
 const COLOR_MARK       = 103;            // opaque AMMNUM patch pixel index
+export const AM_CROSSHAIR_COLOR = 6 * 16; // XHAIRCOLORS (GRAYS)
 const PLAYER_COLORS    = [7 * 16, 6 * 16, 4 * 16, 256 - 5 * 16];
 const COLOR_INVISIBLE_PLAYER = 246;
 
@@ -428,6 +429,16 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     }
     overlayCtx.stroke();
   }
+
+  // am_map.c:AM_drawCrosshair writes the single center framebuffer pixel
+  // after walls/players/things and before player-placed marks.
+  overlayCtx.fillStyle = V_PaletteCSS(AM_CROSSHAIR_COLOR);
+  overlayCtx.fillRect(
+    dstX + Math.trunc(AM_FRAME_WIDTH / 2) * sx,
+    dstY + Math.trunc(AM_FRAME_HEIGHT / 2) * sy,
+    sx,
+    sy,
+  );
 
   // Player-placed marks (am_map.c:AM_drawMarks).
   overlayCtx.fillStyle = V_PaletteCSS(COLOR_MARK);

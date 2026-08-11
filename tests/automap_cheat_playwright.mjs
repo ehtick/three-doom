@@ -116,7 +116,13 @@ try {
         ctx.rect = originalRect;
         ctx.stroke = originalStroke;
       }
-      return { count, thingSegments, playerSegments, clipRect };
+      return {
+        count,
+        thingSegments,
+        playerSegments,
+        clipRect,
+        crosshair: Array.from(ctx.getImageData(160, 84, 1, 1).data),
+      };
     };
 
     const interruptedMode = await typeKeys([
@@ -150,6 +156,13 @@ try {
       thingCount,
       thingColor: automap.AM_THING_COLOR,
       thingStyle,
+      crosshairColor: automap.AM_CROSSHAIR_COLOR,
+      expectedCrosshair: Array.from(
+        palette.V_GetActivePalette().slice(
+          automap.AM_CROSSHAIR_COLOR * 4,
+          automap.AM_CROSSHAIR_COLOR * 4 + 4,
+        ),
+      ),
       playerCheatsBefore,
       playerCheatsAfter,
     };
@@ -178,7 +191,11 @@ try {
     if (JSON.stringify(draw.clipRect) !== JSON.stringify([0, 0, 320, 168])) {
       failures.push(`automap clip is not 320x168: ${JSON.stringify(draw.clipRect)}`);
     }
+    if (JSON.stringify(draw.crosshair) !== JSON.stringify(result.expectedCrosshair)) {
+      failures.push(`automap crosshair pixel mismatch: ${JSON.stringify(draw.crosshair)}`);
+    }
   }
+  if (result.crosshairColor !== 96) failures.push(`crosshair index mismatch: ${result.crosshairColor}`);
   if (result.thingColor !== 112 || result.thingStyle !== '#78ff70') {
     failures.push(`thing color mismatch: ${JSON.stringify(result)}`);
   }
