@@ -139,6 +139,7 @@ function _playDemo(name) {
 
 export function D_StartTitle() {
   // matches d_main.c: gameaction = ga_nothing; demosequence = -1; D_AdvanceDemo();
+  doomstat.set_gameaction(0 /*ga_nothing*/);
   demosequence = -1;
   D_AdvanceDemo();
 }
@@ -460,6 +461,7 @@ async function D_DoomLoop() {
   _amDrawer = am.AM_Drawer;
   _amTicker = am.AM_Ticker;
   const mMenu = await import('./m_menu.js');
+  mMenu.M_SetExternals({ D_StartTitle });
   _menuDrawer = mMenu.M_Drawer;
   _menuTicker = mMenu.M_Ticker;
   _isStatusBarVisible = mMenu.isStatusBarVisible;

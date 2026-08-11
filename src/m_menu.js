@@ -11,7 +11,7 @@
 
 import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
-  netgame, automapactive, players, consoleplayer,
+  usergame, netgame, automapactive, players, consoleplayer,
   mouseSensitivity, set_mouseSensitivity,
   snd_SfxVolume as sfxVolume, snd_MusicVolume as musicVolume,
 } from './doomstat.js';
@@ -30,7 +30,7 @@ import {
   S_SetSfxVolume as S_ApplySfxVolume,
   S_StartSound,
 } from './s_sound.js';
-import { sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sounds.js';
+import { sfx_oof, sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sounds.js';
 import { HU_ToggleMessages, showMessages } from './hu_stuff.js';
 import { D_AcquirePointerLock } from './d_keyboard.js';
 import { I_Quit } from './i_system.js';
@@ -41,7 +41,11 @@ import {
 import { V_PaletteCSS } from './v_palette.js';
 import { I_SetPalette } from './i_video.js';
 import { W_CacheLumpName } from './w_wad.js';
-import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4, NEWGAME } from './d_englsh.js';
+import {
+  ENDGAME, GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4,
+  NETEND, NEWGAME,
+} from './d_englsh.js';
+import { M_EndGameRoute } from './m_menu_endgame_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { HU_DrawLayout, HU_GetFont } from './hu_font.js';
@@ -157,12 +161,11 @@ SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
   _drawPatchDoom(ctx, 'M_SKILL', 54, 38, lx, ly, sx, sy);
 };
 
-// m_menu.c:339-372 — OptionsMenu (the "End Game" entry is intentionally
-// omitted in this port). The two `status:-1` spacer rows (option_empty1/2)
+// m_menu.c:339-372 — the two `status:-1` spacer rows (option_empty1/2)
 // reserve the lines on which M_DrawOptions draws the screen-size and
-// mouse-sensitivity thermos (one line BELOW each slider's label). The faithful
-// indicators/title/thermos are painted by `draw` below.
+// mouse-sensitivity thermos (one line BELOW each slider's label).
 const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
+  { patch: 'M_ENDGAM', label: 'End Game',          action: () => M_EndGame() },
   { patch: 'M_MESSG',  label: 'Messages',          action: () => HU_ToggleMessages() },
   { patch: 'M_DETAIL', label: 'Graphic Detail',    action: () => { _detailLevel ^= 1; } },
   { patch: 'M_SCRNSZ', label: 'Screen Size',       slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
@@ -171,10 +174,9 @@ const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
   { spacer: true },
   { patch: 'M_SVOL',   label: 'Sound Volume',      action: () => pushMenu(SOUND_MENU) },
 ]};
-// m_menu.c:339 options_e — row indices into OPTIONS_MENU.items, each one below
-// vanilla's since the "End Game" row is omitted. Each thermo sits on the spacer
-// row one line below its slider label, hence the `+ 1`.
-const opt_messages = 0, opt_detail = 1, opt_scrnsize = 2, opt_mousesens = 4;
+// m_menu.c:339-349 options_e — exact row indices. Each thermo sits on the
+// spacer row one line below its slider label, hence the `+ 1`.
+const opt_messages = 1, opt_detail = 2, opt_scrnsize = 3, opt_mousesens = 5;
 // m_menu.c:951-966 M_DrawOptions — title, on/off + hi/lo indicators, thermos.
 OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
   const x = OPTIONS_MENU.x, y = OPTIONS_MENU.y, LH = LINE_HEIGHT;
@@ -251,6 +253,37 @@ export function M_StartMessage(text, routine, input) {
 export function M_StopMessage() {
   if (_message !== null) set_menuactive(_message.lastMenuActive);
   _message = null;
+}
+
+// d_main owns the attract-loop state. Wire its synchronous title entry point
+// when D_DoomLoop wires the other menu callbacks, avoiding a d_main <-> m_menu
+// static import cycle or a mutable global function.
+let _startTitle = null;
+export function M_SetExternals(refs) {
+  if (typeof refs?.D_StartTitle === 'function') _startTitle = refs.D_StartTitle;
+}
+
+// m_menu.c:996-1022 — only a lowercase Y ends the game. M_Responder closes
+// every dismissed message after invoking its callback, matching the C flow.
+function M_EndGameResponse(key) {
+  if (key !== 0x79 /*y*/) return;
+  if (_currentMenu !== null) _currentMenu.lastOn = _selected;
+  M_ClearMenus();
+  if (_startTitle === null) throw new Error('M_EndGame: D_StartTitle is not wired');
+  _startTitle();
+}
+
+function M_EndGame() {
+  const route = M_EndGameRoute(usergame, netgame);
+  if (route === 'inactive') {
+    S_StartSound(null, sfx_oof);
+    return;
+  }
+  if (route === 'netgame') {
+    M_StartMessage(NETEND, null, false);
+    return;
+  }
+  M_StartMessage(ENDGAME, M_EndGameResponse, true);
 }
 
 // ---------- Navigation ----------
