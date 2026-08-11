@@ -3,7 +3,7 @@
 // but the practical wrapper here registers explicit code -> action handlers so
 // it slots cleanly into the JS keyboard event path.
 
-import { players, consoleplayer, gamemode } from './doomstat.js';
+import { players, consoleplayer, gamemode, netgame } from './doomstat.js';
 import { GameMode_t } from './doomdef.js';
 import { S_ChangeMusic } from './s_sound.js';
 import { mus_runnin, mus_e1m1 } from './sounds.js';
@@ -118,6 +118,10 @@ const cheats = [
 
 // Driven by keyboard listener — each lowercase letter advances all sequences.
 export function cht_HandleKey(charCode) {
+  // st_stuff.c:543 — cheats are not even advanced while a netgame is active.
+  // Returning before cht_CheckCheat also prevents a partial sequence typed in
+  // multiplayer from completing after the player leaves the netgame.
+  if (netgame) return;
   const p = players[consoleplayer];
   if (p === undefined || p === null || p.mo === null) return;
   for (const c of cheats) {

@@ -35,7 +35,7 @@ try {
   const result = await page.evaluate(async () => {
     const keyboard = await import('/src/d_keyboard.js');
     await import('/src/am_map.js');
-    await import('/src/m_cheat.js');
+    const cheat = await import('/src/m_cheat.js');
     const events = await import('/src/d_event.js');
     const doomstat = await import('/src/doomstat.js');
     const finale = await import('/src/f_finale.js');
@@ -230,7 +230,18 @@ try {
     finale.F_Shutdown();
     doomstat.set_gamestate(0 /*GS_LEVEL*/);
     const netgameDuringCheck = doomstat.netgame;
+
+    // ST_Responder returns before advancing any cheat sequence in a netgame.
+    const gamePlayer = doomstat.players[doomstat.consoleplayer];
+    gamePlayer.cheats &= ~2; // CF_GODMODE
+    for (const ch of 'iddq') cheat.cht_HandleKey(ch.charCodeAt(0));
+    const godAfterNetPrefix = (gamePlayer.cheats & 2) !== 0;
     doomstat.set_netgame(false);
+    cheat.cht_HandleKey('d'.charCodeAt(0));
+    const godAfterNetSuffix = (gamePlayer.cheats & 2) !== 0;
+    for (const ch of 'iddqd') cheat.cht_HandleKey(ch.charCodeAt(0));
+    const godAfterLiveCheat = (gamePlayer.cheats & 2) !== 0;
+    gamePlayer.cheats &= ~2;
 
     // Closed-map minus belongs to M_Responder's view-size shortcut. Once Tab
     // opens automap, every IDFA letter still reaches the cheat sequencer and F
@@ -270,6 +281,9 @@ try {
       gameplayRelease,
       pointerRequests,
       netgameDuringCheck,
+      godAfterNetPrefix,
+      godAfterNetSuffix,
+      godAfterLiveCheat,
       sensitivityBefore,
       sensitivityAfter,
       sensitivityMovement,
@@ -310,6 +324,10 @@ try {
   if (!zero(result.gameplayRelease)) failures.push('mouseup did not clear gameplay button');
   if (result.pointerRequests !== 1) failures.push(`pointer lock requests: expected 1, got ${result.pointerRequests}`);
   if (result.netgameDuringCheck !== true) failures.push('netgame responder case was not exercised');
+  if (result.godAfterNetPrefix !== false || result.godAfterNetSuffix !== false ||
+      result.godAfterLiveCheat !== true) {
+    failures.push(`netgame cheat guard mismatch: prefix=${result.godAfterNetPrefix}, suffix=${result.godAfterNetSuffix}, live=${result.godAfterLiveCheat}`);
+  }
   if (result.sensitivityBefore !== 5 || result.sensitivityAfter !== 4) {
     failures.push(`mouse slider did not update doomstat (before ${result.sensitivityBefore}, after ${result.sensitivityAfter})`);
   }
