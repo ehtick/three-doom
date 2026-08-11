@@ -69,17 +69,18 @@ async function onKeyDown(e) {
         e.preventDefault?.();
         return;
       }
-      keys.add(e.code);
-      // Outside active gameplay (title pages / demo playback), any non-Esc
+      // During any demo state, or on an attract page, button presses open the
+      // menu and never enter gamekeydown. This precedes state responders in
+      // g_game.c and therefore also covers demo intermissions/finales.
       // keypress opens the main menu so the user doesn't have to know which
       // key to press. Esc keeps the menu closed in that state.
       if (doomstat.menuactive !== true &&
-          (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ ||
-           (doomstat.gamestate === 0 /*GS_LEVEL*/ && doomstat.demoplayback === true))) {
+          (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ || doomstat.demoplayback === true)) {
         if (e.code !== 'Escape' && _mMenu !== null) _mMenu.M_StartControlPanel();
         e.preventDefault?.();
         return;
       }
+      keys.add(e.code);
       // g_game.c:G_Responder handles KEY_PAUSE without a gamestate guard once
       // attract/demo input has been intercepted above. The next complete
       // ticcmd carries BT_SPECIAL|BTS_PAUSE in levels, intermissions, or
@@ -156,6 +157,12 @@ async function onKeyDown(e) {
 function onKeyUp(e) { keys.delete(e.code); }
 
 function onMouseDown(e) {
+    // g_game.c's demo interception consumes mouse-button presses before they
+    // can alter gameplay state. i_video opens the menu on the matching click.
+    if (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ || doomstat.demoplayback === true) {
+      e.preventDefault?.();
+      return;
+    }
     // i_video owns the actual menu tap on the later click event. Its
     // M_HandleTap path consumes every tap while the menu is active, so mirror
     // D_ProcessEvents precedence here before mutating gameplay button state or
@@ -183,7 +190,8 @@ function onMouseDown(e) {
 function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
 
 function onMouseMove(e) {
-    if (doomstat.menuactive !== true &&
+    if (doomstat.menuactive !== true && doomstat.demoplayback !== true &&
+        doomstat.gamestate !== 3 /*GS_DEMOSCREEN*/ &&
         renderer !== null && document.pointerLockElement === renderer.domElement) {
       // g_game.c:G_Responder applies sensitivity before G_BuildTiccmd consumes
       // the axes. Preserve that per-event truncation while accumulating the

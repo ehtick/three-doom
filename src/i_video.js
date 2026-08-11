@@ -76,6 +76,13 @@ function onRendererClick(e) {
     _mMenu.M_HandleTap(e.clientX - rect.left, e.clientY - rect.top);
     return;
   }
+  // g_game.c:G_Responder opens the menu for a mouse-button event throughout
+  // demo playback, including demo intermissions/finales, not just GS_LEVEL.
+  if ((_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/) &&
+      _mMenu !== null) {
+    _mMenu.M_StartControlPanel();
+    return;
+  }
   if (_doomstat.gamestate === 0 /*GS_LEVEL*/ && _doomstat.demoplayback !== true) {
     if (document.pointerLockElement !== renderer.domElement) {
       renderer.domElement.requestPointerLock?.();
@@ -460,15 +467,24 @@ function onKeyUp(e) {
 
 let mouseButtons = 0;
 function onMouseMove(e) {
+  if (_doomstat !== null &&
+      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) return;
   if (document.pointerLockElement !== renderer?.domElement) return;
   // Doom expects ev_mouse with x/y deltas. movementX/movementY are in CSS pixels.
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: e.movementX | 0, data3: -e.movementY | 0 });
 }
 function onMouseDown(e) {
+  if (_doomstat !== null &&
+      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) {
+    e.preventDefault?.();
+    return;
+  }
   mouseButtons |= (1 << e.button);
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: 0, data3: 0 });
 }
 function onMouseUp(e) {
   mouseButtons &= ~(1 << e.button);
+  if (_doomstat !== null &&
+      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) return;
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: 0, data3: 0 });
 }

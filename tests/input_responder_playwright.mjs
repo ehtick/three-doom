@@ -180,6 +180,25 @@ try {
     key('keyup', 'Pause', 'Pause');
     doomstat.set_gamestate(0 /*GS_LEVEL*/);
 
+    // Demo interception is independent of gamestate. Both keyboard and mouse
+    // button presses during a demo intermission open the menu without entering
+    // the live command state.
+    doomstat.set_gamestate(1 /*GS_INTERMISSION*/);
+    doomstat.set_demoplayback(true);
+    menu.M_ClearMenus();
+    key('keydown', 'ControlLeft', 'Control');
+    const demoKeyboard = sample();
+    const demoKeyboardMenu = doomstat.menuactive;
+    key('keyup', 'ControlLeft', 'Control');
+    menu.M_ClearMenus();
+    canvas.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+    canvas.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true, cancelable: true }));
+    const demoMouse = sample();
+    const demoMouseMenu = doomstat.menuactive;
+    canvas.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
+    doomstat.set_demoplayback(false);
+    doomstat.set_gamestate(0 /*GS_LEVEL*/);
+
     const netgameDuringCheck = doomstat.netgame;
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
@@ -205,6 +224,10 @@ try {
       finalePause,
       expectedFinaleWeapon: events.BT_CHANGE | (2 << events.BT_WEAPONSHIFT),
       expectedFinalePause: events.BT_SPECIAL | events.BTS_PAUSE,
+      demoKeyboard,
+      demoKeyboardMenu,
+      demoMouse,
+      demoMouseMenu,
     };
   });
 
@@ -243,6 +266,12 @@ try {
   }
   if (result.finalePause.buttons !== result.expectedFinalePause) {
     failures.push(`finale Pause command mismatch: ${JSON.stringify(result.finalePause)}`);
+  }
+  if (!zero(result.demoKeyboard) || result.demoKeyboardMenu !== true) {
+    failures.push(`demo-intermission key leaked or missed menu: ${JSON.stringify(result.demoKeyboard)}`);
+  }
+  if (!zero(result.demoMouse) || result.demoMouseMenu !== true) {
+    failures.push(`demo-intermission mouse leaked or missed menu: ${JSON.stringify(result.demoMouse)}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
