@@ -12,7 +12,10 @@ import { SCREENWIDTH, SCREENHEIGHT, gamestate_t, GameMode_t } from './doomdef.js
 import { mus_intro, mus_dm2ttl, sfx_telept } from './sounds.js';
 import * as doomstat from './doomstat.js';
 import { gamestate, set_gamestate, set_gamemode, set_devparm, set_nomonsters, set_respawnparm, set_fastparm, set_gameepisode, set_gamemap, set_gameskill } from './doomstat.js';
-import { R_InitData, R_TextureNumForName, R_FlatNumForName, R_PrecacheLevel } from './r_data.js';
+import {
+  R_AnimateTextures, R_InitData, R_TextureNumForName, R_FlatNumForName,
+  R_PrecacheLevel,
+} from './r_data.js';
 import { P_Random } from './m_random.js';
 import { ANG45, ANGLETOFINESHIFT, finecosine, finesine } from './tables.js';
 import { P_SetupLevel, P_SetExternals as P_SetupSetExternals } from './p_setup.js';
@@ -266,7 +269,6 @@ let _stPalette = null;
 let _amDrawer = null;
 let _amTicker = null;
 let _menuDrawer = null;
-let _animTextures = null;
 let _fwipeDraw = null;
 let _fwipeActive = null;
 let _fwipeStep = null;
@@ -301,7 +303,6 @@ function D_ClearLoopReferences() {
   _amDrawer = null;
   _amTicker = null;
   _menuDrawer = null;
-  _animTextures = null;
   _fwipeDraw = null;
   _fwipeActive = null;
   _fwipeStep = null;
@@ -349,7 +350,6 @@ async function D_DoomLoop() {
   _menuDrawer = mMenu.M_Drawer;
   _menuTicker = mMenu.M_Ticker;
   _isStatusBarVisible = mMenu.isStatusBarVisible;
-  _animTextures = (await import('./r_data.js')).R_AnimateTextures;
   const fw = await import('./f_wipe.js');
   _fwipeDraw   = fw.wipe_Draw;
   _fwipeActive = fw.wipe_isActive;
@@ -439,8 +439,6 @@ async function D_DoomLoop() {
           if (_stPalette !== null) _stPalette();
           // Re-attenuate live sounds based on the listener's position.
           if (_sUpdate !== null) _sUpdate(p);
-          // Animate wall/flat textures every tic.
-          if (_animTextures !== null) _animTextures(doomstat.leveltime);
         }
       } else if (gamestate === gamestate_t.GS_INTERMISSION && _wiTicker !== null) {
         // Drive the intermission counters + 'press key to continue' timer.
@@ -614,7 +612,7 @@ export async function D_DoomMain() {
     doomstat.gamemode === GameMode_t.commercial ? 3
     : (doomstat.gamemode === GameMode_t.registered ||
        doomstat.gamemode === GameMode_t.retail) ? 2 : 1);
-  pSpec.P_SpecSetExternals({ PLights: pLights });
+  pSpec.P_SpecSetExternals({ PLights: pLights, R_AnimateTextures });
   pSpec.P_SpecSetFloor({ PFloor: pFloor });
   pSpec.P_SpecSetInter({ PInter: pInter });
   // Wire p_user → p_spec for P_PlayerInSpecialSector.

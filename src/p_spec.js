@@ -28,7 +28,11 @@ export function P_InitPicAnims() {
 // At level load, give each special-sector spawn its thinker (light flashes
 // etc.) and initialise switches/buttons.
 let _PLights = null;
-export function P_SpecSetExternals(refs) { if (refs.PLights != null) _PLights = refs.PLights; }
+let _RAnimateTextures = null;
+export function P_SpecSetExternals(refs) {
+  if (refs.PLights != null) _PLights = refs.PLights;
+  if (refs.R_AnimateTextures != null) _RAnimateTextures = refs.R_AnimateTextures;
+}
 
 export function P_SpawnSpecials() {
   for (let i = 0; i < numsectors; i++) {
@@ -63,6 +67,9 @@ export function P_SpawnSpecials() {
 let _PSwitch = null;
 export function P_SpecSetSwitch(refs) { if (refs.PSwitch != null) _PSwitch = refs.PSwitch; }
 export function P_UpdateSpecials() {
+  // p_spec.c:1099-1108 — animation translation is selected inside
+  // P_UpdateSpecials, before P_Ticker increments leveltime.
+  if (_RAnimateTextures !== null) _RAnimateTextures(doomstat.leveltime);
   if (_PSwitch !== null && typeof _PSwitch.P_UpdateButtons === 'function') _PSwitch.P_UpdateButtons();
 }
 
