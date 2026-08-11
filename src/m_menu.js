@@ -11,7 +11,7 @@
 
 import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
-  automapactive, players, consoleplayer,
+  netgame, automapactive, players, consoleplayer,
   mouseSensitivity, set_mouseSensitivity,
   snd_SfxVolume as sfxVolume, snd_MusicVolume as musicVolume,
 } from './doomstat.js';
@@ -41,8 +41,9 @@ import {
 import { V_PaletteCSS } from './v_palette.js';
 import { I_SetPalette } from './i_video.js';
 import { W_CacheLumpName } from './w_wad.js';
-import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4 } from './d_englsh.js';
+import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4, NEWGAME } from './d_englsh.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
+import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 const getPatch = V_DecodePatchToCanvas;
 const GAMMA_MESSAGES = [GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4];
@@ -91,7 +92,7 @@ const _saveStrings = new Array(SAVE_SLOTS).fill('EMPTY SLOT');
 // ---------- Menus ----------
 const CONTINUE_ITEM = { patch: 'M_CONT', label: 'Continue', action: () => M_ClearMenus() };
 const MAIN_MENU_BASE_ITEMS = [
-  { patch: 'M_NGAME',  label: 'New Game',  action: () => _openEpisodeMenu() },
+  { patch: 'M_NGAME',  label: 'New Game',  action: () => M_NewGame() },
   { patch: 'M_OPTION', label: 'Options',   action: () => pushMenu(OPTIONS_MENU) },
   // { patch: 'M_LOADG',  label: 'Load Game', action: () => pushMenu(LOAD_MENU) },
   // { patch: 'M_SAVEG',  label: 'Save Game', action: () => pushMenu(SAVE_MENU) },
@@ -116,6 +117,24 @@ const EPISODE_MENU = { name: 'Episode', x: 48, y: 63, items: EPISODE_ITEMS };
 function _openEpisodeMenu() {
   EPISODE_MENU.items = EPISODE_ITEMS.slice(0, gamemode === GameMode_t.retail ? 4 : 3);
   pushMenu(EPISODE_MENU);
+}
+
+// m_menu.c:873-885 — a live network game refuses replacement, Doom II skips
+// episode selection, and Doom 1 keeps the episode menu.  `epi` remains zero in
+// the commercial C path, so explicitly restore the JS port's 1-based equivalent
+// before opening the skill menu.
+function M_NewGame() {
+  const route = M_NewGameRoute(netgame, demoplayback, gamemode);
+  if (route === 'message') {
+    M_StartMessage(NEWGAME, null, false);
+    return;
+  }
+  if (route === 'skill') {
+    _pendingEpisode = 1;
+    pushMenu(SKILL_MENU);
+    return;
+  }
+  _openEpisodeMenu();
 }
 
 const SKILL_MENU = { name: 'Skill', x: 48, y: 63, items: [
