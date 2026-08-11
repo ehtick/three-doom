@@ -510,7 +510,7 @@ async function D_DoomLoop() {
     // forward and the helper retains only the sub-tic wall-clock phase, rather
     // than replaying whole wipe tics as a post-wipe catch-up burst.
     const wipeActive = _fwipeActive !== null && _fwipeActive() === true;
-    const clock = D_AdvanceSimulationClock(_ticAccum, dt, wipeActive);
+    const clock = D_AdvanceSimulationClock(_ticAccum, dt, wipeActive, doomstat.singletics);
     _ticAccum = clock.remainder;
     let dueTics = clock.due;
     while (dueTics-- > 0) {

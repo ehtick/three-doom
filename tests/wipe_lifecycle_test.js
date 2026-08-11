@@ -48,7 +48,7 @@ Deno.test('active wipes gate the complete simulation tic pipeline', () => {
   const loopStart = mainSource.indexOf('async function D_DoomLoop()');
   const loop = mainSource.slice(loopStart);
   const wipeGate = loop.indexOf('const wipeActive = _fwipeActive !== null && _fwipeActive() === true');
-  const clock = loop.indexOf('D_AdvanceSimulationClock(_ticAccum, dt, wipeActive)', wipeGate);
+  const clock = loop.indexOf('D_AdvanceSimulationClock(_ticAccum, dt, wipeActive', wipeGate);
   const ticLoop = loop.indexOf('while (dueTics-- > 0)', clock);
   const display = loop.indexOf('D_Display()', ticLoop);
   if (wipeGate < 0 || clock <= wipeGate || ticLoop <= clock || display <= ticLoop) {

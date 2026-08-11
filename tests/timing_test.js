@@ -41,3 +41,13 @@ Deno.test('wipe frames discard whole tics but retain wall-clock phase', () => {
     throw new Error(`resumed phase: expected 0, got ${resumed.remainder}`);
   }
 });
+
+Deno.test('singletics advances exactly once per non-wipe rendered frame', () => {
+  for (const elapsed of [0, 1 / 240, 1 / 60, 0.5, 10]) {
+    const clock = D_AdvanceSimulationClock(0.875, elapsed, false, true);
+    assertEquals(clock.due, 1, `singletics due count at ${elapsed}s`);
+    assertEquals(clock.remainder, 0, `singletics remainder at ${elapsed}s`);
+  }
+  const wipe = D_AdvanceSimulationClock(0.25, 1 / 60, true, true);
+  assertEquals(wipe.due, 0, 'singletics remains frozen during a wipe');
+});

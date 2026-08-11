@@ -119,10 +119,12 @@ export let usergame      = false;
 export let demoplayback  = false;
 export let demorecording = false;
 export let singledemo    = false;
+export let timingdemo    = false;
 export function set_usergame(v)      { usergame = v; }
 export function set_demoplayback(v)  { demoplayback = v; }
 export function set_demorecording(v) { demorecording = v; }
 export function set_singledemo(v)    { singledemo = v; }
+export function set_timingdemo(v)    { timingdemo = v; }
 
 // ---------- Game state ----------
 export let gamestate = 3; // GS_DEMOSCREEN

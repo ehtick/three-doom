@@ -25,7 +25,8 @@ import { F_StartFinale } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
 import { G_SecretExitAvailable } from './g_game_logic.js';
 import { G_DecodeDemoTiccmd, G_EncodeDemoTiccmd } from './g_demo.js';
-import { I_Error } from './i_system.js';
+import { G_BeginTimeDemoSample, G_CompleteTimeDemoSample } from './g_timedemo.js';
+import { I_Error, I_GetTime } from './i_system.js';
 import { W_CheckNumForName } from './w_wad.js';
 import {
   G_DeathMatchSpawnPlayer as G_RunDeathMatchSpawnPlayer,
@@ -283,6 +284,12 @@ export function G_DoLoadLevel() {
   if (_loadLevel !== null) _loadLevel(gameepisode, gamemap, gameskill);
   // g_game.c:485 — spying never carries across a level load.
   doomstat.set_displayplayer(consoleplayer);
+  // g_game.c sets starttime after P_SetupLevel. Capture both clocks because a
+  // browser timedemo can begin after the attract loop has already advanced
+  // gametic; its useful result is the number of demo tics, not page lifetime.
+  if (doomstat.timingdemo === true) {
+    _timeDemoSample = G_BeginTimeDemoSample(_demoName, gametic, I_GetTime());
+  }
 }
 
 export function G_DeferedInitNew(skill, episode, map) {
@@ -295,6 +302,12 @@ export function G_DoNewGame() {
   // demo or netgame interrupted by 'New Game' doesn't leak its mode into
   // the fresh game.
   doomstat.set_demoplayback(false);
+  doomstat.set_singledemo(false);
+  if (doomstat.timingdemo === true) {
+    doomstat.set_timingdemo(false);
+    doomstat.set_singletics(false);
+    _timeDemoSample = null;
+  }
   doomstat.set_netgame?.(false);
   doomstat.set_deathmatch?.(0);
   doomstat.set_respawnparm?.(false);
@@ -383,6 +396,16 @@ let _demoBytes = null;
 let _demoPos = 0;
 let _demoName = '';
 let _onDemoEnd = null;
+let _timeDemoSample = null;
+let _timeDemoResult = null;
+let _onTimeDemoEnd = null;
+
+function G_CancelPendingTimeDemo() {
+  if (doomstat.timingdemo !== true) return;
+  doomstat.set_timingdemo(false);
+  doomstat.set_singletics(false);
+  _timeDemoSample = null;
+}
 
 // Caller passes either a lump-name string ("DEMO1") OR a Uint8Array.
 export function G_DeferedPlayDemo(nameOrBytes) {
@@ -407,7 +430,11 @@ export function G_DoPlayDemo() {
     _demoName = '';
     bytes = _deferred.source;
   }
-  if (bytes === null || bytes === undefined || bytes.length < 13) return;
+  if (bytes === null || bytes === undefined || bytes.length < 13) {
+    G_CancelPendingTimeDemo();
+    doomstat.set_singledemo(false);
+    return;
+  }
   _demoBytes = bytes;
   _demoPos = 0;
   // Header: skip & validate VERSION byte (vanilla bails on mismatch).
@@ -415,6 +442,8 @@ export function G_DoPlayDemo() {
   if (v !== DEMO_VERSION) {
     console.warn(`Demo ${_demoName} version ${v} != engine ${DEMO_VERSION}; aborting.`);
     _demoBytes = null;
+    G_CancelPendingTimeDemo();
+    doomstat.set_singledemo(false);
     return;
   }
   const skill   = _demoBytes[_demoPos++];
@@ -442,8 +471,23 @@ export function G_ReadDemoTiccmd(cmd) {
   return true;
 }
 
-export function G_PlayDemo(nameOrBytes) { G_DeferedPlayDemo(nameOrBytes); }
-export function G_TimeDemo(nameOrBytes) { G_DeferedPlayDemo(nameOrBytes); }
+export function G_PlayDemo(nameOrBytes) {
+  G_CancelPendingTimeDemo();
+  doomstat.set_singledemo(true);
+  G_DeferedPlayDemo(nameOrBytes);
+}
+
+export function G_TimeDemo(nameOrBytes) {
+  _timeDemoResult = null;
+  _timeDemoSample = null;
+  doomstat.set_singledemo(false);
+  doomstat.set_timingdemo(true);
+  doomstat.set_singletics(true);
+  G_DeferedPlayDemo(nameOrBytes);
+}
+
+export function G_GetTimeDemoResult() { return _timeDemoResult; }
+export function G_SetTimeDemoEndCallback(fn) { _onTimeDemoEnd = fn; }
 
 // G_CheckDemoStatus — called when the DEMOMARKER is hit. Stop playback,
 // reset all the global flags vanilla's G_CheckDemoStatus zeroes so the
@@ -451,6 +495,16 @@ export function G_TimeDemo(nameOrBytes) { G_DeferedPlayDemo(nameOrBytes); }
 // and hand control back to the title-screen attract sequence.
 export function G_CheckDemoStatus() {
   if (doomstat.demoplayback !== true) return false;
+  let timeDemoResult = null;
+  if (doomstat.timingdemo === true && _timeDemoSample !== null) {
+    timeDemoResult = G_CompleteTimeDemoSample(_timeDemoSample, gametic, I_GetTime());
+    _timeDemoResult = timeDemoResult;
+  }
+  if (doomstat.timingdemo === true) {
+    doomstat.set_timingdemo(false);
+    doomstat.set_singletics(false);
+    _timeDemoSample = null;
+  }
   doomstat.set_demoplayback(false);
   doomstat.set_netgame?.(false);
   doomstat.set_deathmatch?.(0);
@@ -461,7 +515,16 @@ export function G_CheckDemoStatus() {
     for (let i = 1; i < MAXPLAYERS; i++) doomstat.playeringame[i] = false;
   }
   doomstat.set_consoleplayer?.(0);
+  doomstat.set_singledemo(false);
   _demoBytes = null; _demoPos = 0;
+  if (timeDemoResult !== null) {
+    console.info(timeDemoResult.message);
+    if (_onTimeDemoEnd !== null) _onTimeDemoEnd(timeDemoResult);
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' &&
+        typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('doom:timedemo', { detail: timeDemoResult }));
+    }
+  }
   if (_onDemoEnd !== null) _onDemoEnd();
   return true;
 }
