@@ -13,7 +13,7 @@ import { firstspritelump, lastspritelump } from './r_data.js';
 import { W_CacheLumpNum } from './w_wad.js';
 import { lumpinfo } from './w_wad.js';
 import { I_Error } from './i_system.js';
-import { FRACBITS } from './m_fixed.js';
+import { FRACUNIT } from './m_fixed.js';
 import { patch_t } from './v_video.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { R_MakeIndexedTexture, R_MakeDoomSpriteMaterial } from './r_shader.js';
@@ -25,6 +25,7 @@ import {
   SPRITE_SHADOW_OPACITY,
   SPRITE_SHADOW_PALETTE_INDEX,
 } from './r_sprite_logic.js';
+import { R_SpriteBillboardCenterY } from './r_sprite_projection.js';
 
 // ---------- Sprite definition tables ----------
 export let numsprites = 0;
@@ -270,6 +271,22 @@ const SHADOW_ALPHATEST = 0.1;
 // restore path so they can't drift apart.
 const SPRITE_ALPHATEST = 0.5;
 
+// Apply the source-authored patch bounds to a Three.js billboard. Keeping this
+// operation explicit makes it possible to verify the actual Sprite geometry,
+// including its non-central horizontal origin, without running the game loop.
+export function R_ApplySpritePatchGeometry(sprite, mobj, patch) {
+  if (sprite.scale.x !== patch.w || sprite.scale.y !== patch.h) {
+    sprite.scale.set(patch.w, patch.h, 1);
+  }
+  const centerX = patch.offsetX / patch.w;
+  if (sprite.center.x !== centerX) sprite.center.x = centerX;
+  sprite.position.set(
+    mobj.x / FRACUNIT,
+    R_SpriteBillboardCenterY(mobj.z, patch.offsetY, patch.h),
+    -mobj.y / FRACUNIT,
+  );
+}
+
 export function R_UpdateSprites() {
   for (const entry of _liveSprites) {
     const mo = entry.mobj;
@@ -309,37 +326,14 @@ export function R_UpdateSprites() {
     if (entry.sprite.material.uniforms.map.value !== tex) {
       entry.sprite.material.uniforms.map.value = tex;
     }
-    if (entry.sprite.scale.x !== t.w || entry.sprite.scale.y !== t.h) {
-      entry.sprite.scale.set(t.w, t.h, 1);
-    }
-    // R_ProjectSprite subtracts spriteoffset before projecting either normal
-    // or flipped columns. THREE.Sprite.center expresses that patch origin in
-    // billboard-local space, so it follows the camera-facing right vector
-    // without rebuilding a world-space offset every frame. Flipping changes
-    // only column sampling in vanilla; the projected patch bounds stay fixed.
-    const centerX = t.offsetX / t.w;
-    if (entry.sprite.center.x !== centerX) entry.sprite.center.x = centerX;
-    // Vanilla R_ProjectSprite anchors the sprite top at (mobj.z + topoffset)
-    // and draws downwards; bottom edge sits at (mobj.z + topoffset - height).
-    // Three.Sprite centres on .position, so we shift down by h/2.
-    const halfH = t.h / 2;
-    let centerY = mo.z / 65536 + t.offsetY - halfH;
-    // Vanilla draws sprites *over* the floor flat, so the few pixels that dip
-    // below the mobj's z (topoffset < height, e.g. BON1's flask base) stay
-    // visible. Our true-3D floor plane is opaque and would occlude them. Clamp
-    // the sprite so its bottom never sinks below the floor it stands on — the
-    // full sprite then rests on the floor instead of being clipped into it.
-    // Floating items (soulsphere, keys) already sit above the floor, so the
-    // clamp leaves them untouched.
-    const floorY = mo.floorz / 65536;
-    if (centerY - halfH < floorY) centerY = floorY + halfH;
+    // R_ProjectSprite subtracts spriteoffset horizontally and anchors the top
+    // at mobj.z + spritetopoffset. Flipping changes only column sampling; the
+    // projected bounds stay fixed. Do not lift short-origin patches to the
+    // floor: retaining depth testing may clip the part behind a true-3D plane,
+    // but it preserves Doom's authored origin instead of moving every pixel.
+    R_ApplySpritePatchGeometry(entry.sprite, mo, t);
     // Fuzz shimmer: nudge the Spectre's billboard vertically each frame.
-    if (isShadow) centerY += (Math.random() - 0.5) * SHADOW_JITTER;
-    entry.sprite.position.set(
-      mo.x / 65536,
-      centerY,
-      -mo.y / 65536,
-    );
+    if (isShadow) entry.sprite.position.y += (Math.random() - 0.5) * SHADOW_JITTER;
     // MF_SHADOW (Spectre / partial-invisibility powerup): swap the lit opaque
     // billboard for a dark, translucent, shimmering one. The flag can toggle at
     // runtime (the powerup wears off), so switch material modes on change.

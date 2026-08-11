@@ -356,6 +356,10 @@ export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowPalette
     vertexShader: SPRITE_VERT_SHADER,
     fragmentShader: SPRITE_FRAG_SHADER,
     transparent: true,
+    // Preserve world occlusion at authored patch coordinates. Disabling the
+    // depth test would expose sprites through walls; lifting them above floors
+    // would instead change the source-defined origin.
+    depthTest: true,
     depthWrite: true,
   });
   // Sprite.raycast reads material.rotation even for a custom material.
