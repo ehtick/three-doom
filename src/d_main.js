@@ -11,6 +11,7 @@ import { V_PaletteCSS } from './v_palette.js';
 import { W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum } from './w_wad.js';
 import { M_CheckParm, myargv, myargc } from './m_argv.js';
 import { M_LoadDefaults } from './m_misc.js';
+import { M_RegisterDoomDefaults } from './m_defaults.js';
 import { SCREENWIDTH, SCREENHEIGHT, gamestate_t, GameMode_t } from './doomdef.js';
 import { mus_intro, mus_dm2ttl, sfx_telept } from './sounds.js';
 import * as doomstat from './doomstat.js';
@@ -572,7 +573,9 @@ export async function D_DoomMain() {
   set_gamemode(detectedMode);
   W_InitMultipleFiles([{ name: iwad.name, buffer: iwad.buffer }]);
 
-  // Defaults / config (localStorage).
+  // m_misc.c:M_LoadDefaults resets and loads every registered binding before
+  // the settings are consumed by graphics or input initialization.
+  M_RegisterDoomDefaults();
   M_LoadDefaults();
 
   // System init.

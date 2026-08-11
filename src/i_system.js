@@ -2,6 +2,7 @@
 // System-specific interface for the browser.
 
 import { TICRATE } from './doomdef.js';
+import { M_SaveDefaults } from './m_misc.js';
 
 // Doom uses a 35Hz tic clock derived from real-time. In the browser we anchor
 // at I_Init() and report ticks based on performance.now().
@@ -37,7 +38,9 @@ export function I_BaseTiccmd() {
 }
 
 export function I_Quit() {
-  // No exit code in the browser — show the title screen / stop the loop.
+  // i_system.c:I_Quit saves the active defaults before graphics shutdown.
+  // The browser has no process exit, so doom:quit performs the teardown.
+  M_SaveDefaults();
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('doom:quit'));
   }

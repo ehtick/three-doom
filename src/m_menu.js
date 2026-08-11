@@ -24,6 +24,7 @@ import { S_StartSound } from './s_sound.js';
 import { sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sounds.js';
 import { HU_ToggleMessages, showMessages } from './hu_stuff.js';
 import { D_AcquirePointerLock } from './d_keyboard.js';
+import { I_Quit } from './i_system.js';
 import {
   gammatable, set_usegamma, usegamma,
   V_DecodePatchToCanvas, V_DrawPatchAtCanvas, V_RegisterPNGPatch,
@@ -268,7 +269,7 @@ function M_QuitDOOM() {
   const gametic = (globalThis.__doom_gametic | 0);
   const idx = (gametic % (QUIT_MESSAGES.length - 1)) + 1;
   M_StartMessage(QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y to quit)', (yes) => {
-    if (yes && typeof window !== 'undefined') window.location.reload();
+    if (yes) I_Quit();
   }, false);
 }
 
