@@ -75,7 +75,8 @@ export function F_Responder(ev) {
   if (!_active) return false;
   if (_castActive) return F_CastResponder(ev);
   // f_finale.c:F_Responder only handles cast keydowns. Chapter skipping is
-  // driven by ticcmd buttons in F_Ticker, so movement/weapon keys cannot skip.
+  // driven by ticcmd buttons in F_Ticker. Vanilla accepts any nonzero button
+  // byte here, including BT_CHANGE and BT_SPECIAL, but never movement alone.
   return false;
 }
 

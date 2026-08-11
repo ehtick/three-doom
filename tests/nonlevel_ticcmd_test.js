@@ -16,6 +16,10 @@ Deno.test('demo and live ticcmds are sampled before every state ticker', () => {
   if (!loop.includes('for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer)')) {
     throw new Error('special buttons are not checked for every active player');
   }
+  if (!loop.includes('D_KeyboardInput.buildCmd(localPlayer)') ||
+      loop.includes('buildFinaleCmd')) {
+    throw new Error('live non-level states do not build the complete ticcmd');
+  }
 
   const finaleBranch = loop.slice(loop.indexOf('GS_FINALE'), finale);
   if (finaleBranch.includes('buildFinaleCmd') || finaleBranch.includes('buildCmd')) {

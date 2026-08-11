@@ -410,8 +410,11 @@ async function D_DoomLoop() {
         } else {
           const localPlayer = players[consoleplayer];
           if (localPlayer !== undefined && localPlayer !== null) {
-            if (gamestate === gamestate_t.GS_LEVEL) D_KeyboardInput.buildCmd(localPlayer);
-            else D_KeyboardInput.buildFinaleCmd(localPlayer);
+            // d_net.c builds the complete console-player command before
+            // G_Ticker in every game state. Intermission ignores everything
+            // except attack/use; commercial finales intentionally accept any
+            // nonzero button byte, including weapon-change and Pause bits.
+            D_KeyboardInput.buildCmd(localPlayer);
           }
         }
         if (_gCheckSpecial !== null) {

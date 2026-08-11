@@ -70,14 +70,6 @@ async function onKeyDown(e) {
         return;
       }
       keys.add(e.code);
-      // KEY_PAUSE — toggle pause during live (non-demo) gameplay. Latch the
-      // request; buildCmd encodes it into the next ticcmd and G_CheckSpecialButtons
-      // performs the paused/music toggle. Ignored outside a level so it can't
-      // strand sendpause across a demo (which bypasses buildCmd).
-      if (e.code === 'Pause') {
-        if (doomstat.gamestate === 0 /*GS_LEVEL*/ && doomstat.demoplayback !== true) sendpause = true;
-        return;
-      }
       // Outside active gameplay (title pages / demo playback), any non-Esc
       // keypress opens the main menu so the user doesn't have to know which
       // key to press. Esc keeps the menu closed in that state.
@@ -86,6 +78,14 @@ async function onKeyDown(e) {
            (doomstat.gamestate === 0 /*GS_LEVEL*/ && doomstat.demoplayback === true))) {
         if (e.code !== 'Escape' && _mMenu !== null) _mMenu.M_StartControlPanel();
         e.preventDefault?.();
+        return;
+      }
+      // g_game.c:G_Responder handles KEY_PAUSE without a gamestate guard once
+      // attract/demo input has been intercepted above. The next complete
+      // ticcmd carries BT_SPECIAL|BTS_PAUSE in levels, intermissions, or
+      // finales, and G_CheckSpecialButtons drains it before the state ticker.
+      if (e.code === 'Pause') {
+        sendpause = true;
         return;
       }
       // Intermission screen — any keypress advances. Check this before
@@ -272,15 +272,6 @@ export const D_KeyboardInput = {
   installEarly() { installListeners(); },
   resetForLevel() { resetLevelInput(); },
   shutdown() { shutdownListeners(); },
-
-  // Finale F_Ticker reads player.cmd.buttons exactly like linuxdoom. Movement
-  // is irrelevant here, so sample only the controls that can set ticcmd bits.
-  buildFinaleCmd(player) {
-    if (player?.cmd === undefined) return;
-    player.cmd.buttons = 0;
-    if ((mouseButtons & 1) !== 0 || keys.has('ControlLeft') || keys.has('ControlRight')) player.cmd.buttons |= 1;
-    if (keys.has('Space')) player.cmd.buttons |= 2;
-  },
 
   // Build the ticcmd from current input. Called once per 35Hz tic.
   // Mirrors g_game.c::G_BuildTiccmd using vanilla's movement tables:

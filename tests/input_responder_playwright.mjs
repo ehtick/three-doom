@@ -24,7 +24,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   const baseUrl = process.env.DOOM_URL ?? 'http://127.0.0.1:8094/';
   const url = new URL(baseUrl);
-  url.searchParams.set('map', 'E1M1');
+  url.searchParams.set('-map', 'E1M1');
   await page.goto(url.href, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() =>
     window.renderer !== undefined &&
@@ -34,6 +34,7 @@ try {
 
   const result = await page.evaluate(async () => {
     const keyboard = await import('/src/d_keyboard.js');
+    const events = await import('/src/d_event.js');
     const doomstat = await import('/src/doomstat.js');
     const game = await import('/src/g_game.js');
     const menu = await import('/src/m_menu.js');
@@ -167,6 +168,18 @@ try {
     document.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
     sample();
 
+    // G_BuildTiccmd runs outside GS_LEVEL too. A weapon key therefore remains
+    // a nonzero finale button byte, and Pause is encoded as the same special
+    // command G_Ticker processes before F_Ticker.
+    doomstat.set_gamestate(2 /*GS_FINALE*/);
+    key('keydown', 'Digit3', '3');
+    const finaleWeapon = sample();
+    key('keyup', 'Digit3', '3');
+    key('keydown', 'Pause', 'Pause');
+    const finalePause = sample();
+    key('keyup', 'Pause', 'Pause');
+    doomstat.set_gamestate(0 /*GS_LEVEL*/);
+
     const netgameDuringCheck = doomstat.netgame;
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
@@ -188,6 +201,10 @@ try {
       afterLevelLoad,
       pausedAfterLevelLoad,
       listenerAfterLevelLoad,
+      finaleWeapon,
+      finalePause,
+      expectedFinaleWeapon: events.BT_CHANGE | (2 << events.BT_WEAPONSHIFT),
+      expectedFinalePause: events.BT_SPECIAL | events.BTS_PAUSE,
     };
   });
 
@@ -220,6 +237,12 @@ try {
   }
   if (result.listenerAfterLevelLoad.forwardmove !== 25) {
     failures.push('level input reset removed or disabled the DOM listener');
+  }
+  if (result.finaleWeapon.buttons !== result.expectedFinaleWeapon) {
+    failures.push(`finale weapon command mismatch: ${JSON.stringify(result.finaleWeapon)}`);
+  }
+  if (result.finalePause.buttons !== result.expectedFinalePause) {
+    failures.push(`finale Pause command mismatch: ${JSON.stringify(result.finalePause)}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
