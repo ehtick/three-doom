@@ -142,7 +142,6 @@ try {
     key('keydown', 'ArrowLeft', 'ArrowLeft');
     const sensitivityAfter = doomstat.mouseSensitivity;
     key('keydown', 'Escape', 'Escape');
-    key('keydown', 'Escape', 'Escape');
     lockedCanvas = canvas;
     mouseMove(7, -7);
     const sensitivityMovement = sample();

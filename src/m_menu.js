@@ -261,9 +261,8 @@ export function M_StopMessage() {
 function _restoreCursor(m) { _selected = (m.lastOn === undefined) ? 0 : m.lastOn; }
 function pushMenu(m) { _currentMenu.lastOn = _selected; _menuStack.push(_currentMenu); _currentMenu = m; _restoreCursor(m); }
 function popMenu()   { _currentMenu.lastOn = _selected; const prev = _menuStack.pop(); _currentMenu = (prev === undefined) ? MAIN_MENU : prev; _restoreCursor(_currentMenu); }
-// m_menu.c:1686-1693 — back out one level, playing sfx_swtchn only when there
-// was a parent to pop to. Shared by Backspace and (in this port) Escape; returns
-// whether a parent existed.
+// m_menu.c:1686-1693 — Backspace backs out one level, playing sfx_swtchn only
+// when there was a parent to pop to. Touch uses this as its mobile stand-in.
 function M_Back() {
   const hadPrev = _menuStack.length > 0;
   popMenu();
@@ -415,12 +414,13 @@ export function M_Responder(ev) {
     return true;
   }
   if (key === KEY_ESCAPE) {
-    // m_menu.c:1680-1684 — vanilla ESC always closes the menu. DEVIATION: in
-    // this port ESC inside a sub-section backs out one level (like Backspace,
-    // m_menu.c:1686), and only closes outright when already at the root menu.
-    // The open path (M_StartControlPanel) plays sfx_swtchn itself, m_menu.c:1614.
+    // m_menu.c:1608-1617,1680-1684 — Escape opens a closed panel, but always
+    // closes an active panel regardless of its current submenu. The open path
+    // plays sfx_swtchn inside M_StartControlPanel in this port.
     if (menuactive !== true) { M_StartControlPanel(); return true; }
-    if (M_Back() !== true) { M_ClearMenus(); S_StartSound(null, sfx_swtchx); }
+    if (_currentMenu !== null) _currentMenu.lastOn = _selected;
+    M_ClearMenus();
+    S_StartSound(null, sfx_swtchx);
     return true;
   }
   if (menuactive !== true) return false;
