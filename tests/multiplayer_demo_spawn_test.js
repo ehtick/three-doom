@@ -2,6 +2,7 @@ import {
   G_EnsurePlayerTopology,
   G_CollectActivePlayers,
   G_ReadDemoTiccmds,
+  G_WriteDemoTiccmds,
   P_RecordDeathMatchStart,
   G_DeathMatchSpawnPlayer,
   G_CheckSpot,
@@ -71,6 +72,16 @@ Deno.test('multiplayer demo commands are consumed once per active player in slot
   const stopped = G_ReadDemoTiccmds(active, () => (++stoppedReads < 2));
   assertEquals(stopped, false, 'demo marker aborts the tic');
   assertEquals(stoppedReads, 2, 'no reads after the marker');
+});
+
+Deno.test('multiplayer demo commands are recorded once per active player in slot order', () => {
+  const active = [
+    { cmd: { slot: 0 } },
+    { cmd: { slot: 2 } },
+  ];
+  const writes = [];
+  G_WriteDemoTiccmds(active, (cmd) => writes.push(cmd.slot));
+  assertEquals(writes.join(','), '0,2', 'demo stream order');
 });
 
 Deno.test('deathmatch starts retain their real count and cap at ten', () => {

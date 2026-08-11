@@ -37,6 +37,7 @@ import { D_AccumulateTics } from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import {
   G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
+  G_WriteDemoTiccmds,
   P_RecordDeathMatchStart, G_CheckSpot as G_RunCheckSpot,
 } from './g_multiplayer.js';
 
@@ -277,6 +278,7 @@ let _sUpdate = null;
 let _sStartMusic = null;
 let _menuTicker = null;
 let _gReadDemoCmd = null;
+let _gWriteDemoCmd = null;
 let _wiDrawer  = null;
 let _wiTicker  = null;
 let _wiResponder = null;
@@ -322,6 +324,7 @@ function D_ClearLoopReferences() {
   _gCheckSpecial = null;
   _gPlayDemo = null;
   _gReadDemoCmd = null;
+  _gWriteDemoCmd = null;
   _huTicker = null;
   _sUpdate = null;
   _sStartMusic = null;
@@ -371,6 +374,7 @@ async function D_DoomLoop() {
   _gCheckSpecial = gMod.G_CheckSpecialButtons;
   _gPlayDemo    = gMod.G_DeferedPlayDemo;
   _gReadDemoCmd = gMod.G_ReadDemoTiccmd;
+  _gWriteDemoCmd = gMod.G_WriteDemoTiccmd;
   gMod.G_SetDemoEndCallback(() => {
     // After a demo ends, drop straight back to the attract sequence. The
     // current page step will pick up the next slot.
@@ -429,6 +433,9 @@ async function D_DoomLoop() {
         }
         if (doomstat.demoplayback && _gReadDemoCmd !== null) {
           G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
+        }
+        if (doomstat.demorecording && _gWriteDemoCmd !== null) {
+          G_WriteDemoTiccmds(activePlayers, _gWriteDemoCmd);
         }
         if (_gCheckSpecial !== null) {
           for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);

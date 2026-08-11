@@ -35,6 +35,7 @@ try {
   const result = await page.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
     const events = await import('/src/d_event.js');
+    const game = await import('/src/g_game.js');
     const keyboard = await import('/src/d_keyboard.js');
     const loop = await import('/src/d_loop.js');
     const menu = await import('/src/m_menu.js');
@@ -97,7 +98,6 @@ try {
     mouseMove(7, -5);
     const demoStart = doomstat.gametic;
     await waitForNextTic(demoStart);
-    loop.D_DoomRafLoop.stop();
     doomstat.set_demoplayback(false);
     const probe = { cmd: {} };
     keyboard.D_KeyboardInput.buildCmd(probe);
@@ -107,9 +107,40 @@ try {
       angleturn: probe.cmd.angleturn,
       buttons: probe.cmd.buttons,
     };
+
+    // Recording uses the post-action active topology and serializes one
+    // command per active slot. Keep the state ticker inert enough for a sparse
+    // synthetic player while the real D_DoomLoop performs the write.
+    doomstat.set_gamestate(3 /*GS_DEMOSCREEN*/);
+    doomstat.playeringame[0] = true;
+    doomstat.playeringame[1] = false;
+    doomstat.playeringame[2] = true;
+    doomstat.playeringame[3] = false;
+    doomstat.players[2] = {
+      cmd: {
+        forwardmove: -7,
+        sidemove: 9,
+        angleturn: 0x1200,
+        consistancy: 0,
+        chatchar: 0,
+        buttons: 2,
+      },
+    };
+    game.G_RecordDemo('slot-order');
+    // GS_DEMOSCREEN normally intercepts live input. singledemo is exactly the
+    // reference guard that lets an explicit demo session retain controls.
+    doomstat.set_singledemo(true);
+    key('keydown', 'KeyW', 'w');
+    doomstat.set_singledemo(false);
+    const recordStart = doomstat.gametic;
+    await waitForNextTic(recordStart);
+    loop.D_DoomRafLoop.stop();
+    key('keyup', 'KeyW', 'w');
+    const recording = game.G_StopDemo();
+    const recordedPayload = Array.from(recording.bytes.slice(13, -1));
     keyboard.D_KeyboardInput.shutdown();
 
-    return { firstLevelCmd, afterDemoDrain };
+    return { firstLevelCmd, afterDemoDrain, recordedPayload };
   });
 
   const failures = [];
@@ -124,6 +155,10 @@ try {
       result.afterDemoDrain.angleturn !== 0 ||
       result.afterDemoDrain.buttons !== 0) {
     failures.push(`demo tic did not drain live input: ${JSON.stringify(result.afterDemoDrain)}`);
+  }
+  const expectedPayload = [25, 0, 0, 0, 249, 9, 18, 2];
+  if (result.recordedPayload.join(',') !== expectedPayload.join(',')) {
+    failures.push(`active-player recording order mismatch: ${JSON.stringify(result.recordedPayload)}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

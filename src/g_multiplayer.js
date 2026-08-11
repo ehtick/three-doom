@@ -50,6 +50,12 @@ export function G_ReadDemoTiccmds(activePlayers, readDemoTiccmd) {
   return true;
 }
 
+// g_game.c:658-669 records immediately after the optional demo read, using
+// the same ascending active-player order as the stream header topology.
+export function G_WriteDemoTiccmds(activePlayers, writeDemoTiccmd) {
+  for (const player of activePlayers) writeDemoTiccmd(player.cmd);
+}
+
 // p_mobj.c:717-725 — copy a type-11 mapthing into the fixed ten-entry array
 // and return the updated numeric equivalent of deathmatch_p.
 export function P_RecordDeathMatchStart(deathmatchstarts, deathmatchCount, mapthing) {
