@@ -1,0 +1,43 @@
+// Pure finale routing/data helpers shared by g_game.js and f_finale.js.
+// Keeping these free of browser/audio dependencies makes the map breakpoints
+// and selected text/background straightforward to regression-test.
+
+import { GameMode_t } from './doomdef.js';
+import {
+  E1TEXT, E2TEXT, E3TEXT, E4TEXT,
+  C1TEXT, C2TEXT, C3TEXT, C4TEXT, C5TEXT, C6TEXT,
+} from './d_englsh.js';
+
+const DOOM1_FINALES = Object.freeze({
+  1: Object.freeze({ flat: 'FLOOR4_8', text: E1TEXT }),
+  2: Object.freeze({ flat: 'SFLR6_1',  text: E2TEXT }),
+  3: Object.freeze({ flat: 'MFLR8_4',  text: E3TEXT }),
+  4: Object.freeze({ flat: 'MFLR8_3',  text: E4TEXT }),
+});
+
+const DOOM2_FINALES = Object.freeze({
+  6:  Object.freeze({ flat: 'SLIME16', text: C1TEXT }),
+  11: Object.freeze({ flat: 'RROCK14', text: C2TEXT }),
+  20: Object.freeze({ flat: 'RROCK07', text: C3TEXT }),
+  30: Object.freeze({ flat: 'RROCK17', text: C4TEXT }),
+  15: Object.freeze({ flat: 'RROCK13', text: C5TEXT }),
+  31: Object.freeze({ flat: 'RROCK19', text: C6TEXT }),
+});
+
+// f_finale.c:F_StartFinale selects finale content from game mode plus the
+// episode/map that just ended. The fallback mirrors the indetermined-mode C
+// path and also keeps malformed/custom games from drawing undefined content.
+export function F_GetFinaleSpec(mode, episode, map) {
+  if (mode === GameMode_t.commercial) {
+    return DOOM2_FINALES[map] || Object.freeze({ flat: 'F_SKY1', text: C1TEXT });
+  }
+  return DOOM1_FINALES[episode] || DOOM1_FINALES[1];
+}
+
+// g_game.c:G_WorldDone: normal chapter breaks follow MAP06/11/20/30. The
+// MAP15 and MAP31 messages are shown only when their secret exit was taken.
+export function F_ShouldStartCommercialFinale(mode, map, secretExit) {
+  if (mode !== GameMode_t.commercial) return false;
+  if (map === 6 || map === 11 || map === 20 || map === 30) return true;
+  return secretExit === true && (map === 15 || map === 31);
+}

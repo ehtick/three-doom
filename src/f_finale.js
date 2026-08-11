@@ -1,54 +1,30 @@
-// Ported from: linuxdoom-1.10/f_finale.c — end-of-episode finale text +
-// bunny scroller. Episodes 1, 2, 3 each have a unique flow:
+// Ported from: linuxdoom-1.10/f_finale.c — episode/chapter finale text,
+// Doom 1 art screens and bunny scroller, plus Doom II's cast sequence:
 //   E1 → text (E1TEXT) → CREDIT/HELP2 still
 //   E2 → text (E2TEXT) → VICTORY2 still
 //   E3 → text (E3TEXT) → bunny scroller (PFUB1 + PFUB2) → END0..END6 punchline
 
-import { gameepisode, gamemode } from './doomstat.js';
-import { GameMode_t } from './doomdef.js';
+import {
+  gameepisode, gamemode, gamemap,
+  set_automapactive, set_gameaction, set_gamestate, set_viewactive,
+} from './doomstat.js';
+import { GameMode_t, gamestate_t } from './doomdef.js';
+import { gameaction_t } from './d_event.js';
 import { V_DecodePatchToCanvas } from './v_video.js';
 import { S_ChangeMusic, S_StartMusic } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
-
-// Episode-end text (vanilla d_englsh.h).
-const TEXTS = {
-  1:
-    "Once you beat the big badasses and\nclean out the moon base you're supposed\n" +
-    "to win, aren't you? Aren't you? Where's\nyour fat reward and ticket home? What\n" +
-    "the hell is this? It's not supposed to\nend this way!\n\n" +
-    "It stinks like rotten meat, but looks\nlike the lost Deimos base.  Looks like\n" +
-    "you're stuck on The Shores of Hell.\nThe only way out is through.\n\n" +
-    "To continue the DOOM experience, play\nThe Shores of Hell and its amazing\n" +
-    "sequel, Inferno!",
-  2:
-    "You've done it! The hideous cyber-\ndemon lord that ruled the lost Deimos\n" +
-    "moon base has been slain and you\nare triumphant! But ... where are\n" +
-    "you? You clamber to the edge of the\nmoon and look down to see the awful\n" +
-    "truth.\n\n" +
-    "Deimos floats above Hell itself!\nYou've never heard of anyone escaping\n" +
-    "from Hell, but you'll make the bastards\nsorry they ever heard of you! Quickly,\n" +
-    "you rappel down to  the surface of\nHell.\n\n" +
-    "Now, it's on to the final chapter of\nDOOM! -- Inferno.",
-  3:
-    "The loathsome spiderdemon that\nmasterminded the invasion of the moon\n" +
-    "bases and caused so much death has had\nits ass kicked for all time.\n\n" +
-    "A hidden doorway opens and you enter.\nYou've proven too tough for Hell to\n" +
-    "contain, and now Hell at last plays\nfair -- for you emerge from the door\n" +
-    "to see the green fields of Earth!\nHome at last.\n\n" +
-    "You wonder what's been happening on\nEarth while you were battling evil\nunleashed. " +
-    "It's good that no Hell-spawn\ncould have come through that door\nwith you ...",
-  4:
-    "the spider mastermind must have sent forth\nits legions of hellspawn before your\n" +
-    "final confrontation with that terrible\nbeast from hell.  but you stepped forward\n" +
-    "and brought them down ...\n\n" +
-    "Game over, man!  No more chances!",
-};
+import { W_CacheLumpNum, W_CheckNumForName } from './w_wad.js';
+import { playpal_rgba } from './r_data.js';
+import { F_GetFinaleSpec } from './f_finale_logic.js';
 
 // State machine: 0 = typing text, 1 = post-text still / bunny scroll.
 let _stage = 0;
 let _finalecount = 0;
 let _active = false;
 let _done   = null;
+let _finaleText = '';
+let _finaleFlat = '';
+let _commercial = false;
 const getPatch = V_DecodePatchToCanvas;
 const F_TEXTWAIT = 250;
 // f_finale.c:TEXTSPEED — one character per 3 tics (≈12 chars/s at 35Hz).
@@ -56,10 +32,21 @@ const F_TEXTSPEED = 3;
 const F_TEXTSTART = 10; // tics before the first character appears
 
 export function F_StartFinale(onDone) {
+  // f_finale.c:96-101 — entering a finale consumes the queued game action and
+  // disables the live 3D view/automap until the finale advances.
+  set_gameaction(gameaction_t.ga_nothing);
+  set_gamestate(gamestate_t.GS_FINALE);
+  set_viewactive(false);
+  set_automapactive(false);
   _active = true;
   _done = onDone || (() => {});
   _finalecount = 0;
   _stage = 0;
+  _castActive = false;
+  const spec = F_GetFinaleSpec(gamemode, gameepisode, gamemap);
+  _finaleText = spec.text;
+  _finaleFlat = spec.flat;
+  _commercial = gamemode === GameMode_t.commercial;
   // f_finale.c:113 — Doom 1 (shareware/registered/retail) plays mus_victor on
   // the end-of-episode text screen; commercial/indeterminate use mus_read_m.
   const isDoom1 = gamemode === GameMode_t.shareware ||
@@ -70,23 +57,31 @@ export function F_StartFinale(onDone) {
 
 export function F_Responder(ev) {
   if (!_active) return false;
-  if (ev && ev.type === 0) {
-    // For episodes 1/2/4 the still picture closes immediately. For E3 the
-    // bunny ending plays through to its END6 punchline, then closes.
-    if (_stage === 1 && (_finalecount < 2000 || gameepisode !== 3)) {
+  if (_castActive) return F_CastResponder(ev);
+  if (ev === null || ev === undefined) return false;
+  const pressed = ev.type === 0 || (ev.type === 2 && ev.data1 !== 0);
+  if (!pressed) return false;
+  // Vanilla polls ticcmd buttons after 50 tics. DOM input is event-driven, so
+  // an equivalent key or mouse press advances once the same guard has elapsed.
+  if (_commercial && _finalecount > 50) {
+    if (gamemap === 30) F_StartCast();
+    else {
       _active = false;
-      _done();
+      _done(); // G_WorldDone supplied a ga_worlddone callback.
     }
     return true;
   }
+  // Doom 1 episode art is intentionally terminal, matching F_Responder in C.
   return false;
 }
 
 export function F_Ticker() {
   if (_active === false) return;
   _finalecount++;
-  const text = TEXTS[gameepisode] || TEXTS[1];
-  if (_stage === 0 && _finalecount > F_TEXTWAIT + text.length * F_TEXTSPEED) {
+  if (_castActive) { F_CastTicker(); return; }
+  // Doom II holds its text screen until input; MAP30 then enters the cast.
+  if (_commercial) return;
+  if (_stage === 0 && _finalecount > F_TEXTWAIT + _finaleText.length * F_TEXTSPEED) {
     _stage = 1;
     _finalecount = 0;
     // f_finale.c:247 — the E3 bunny scroller gets its own track.
@@ -94,22 +89,53 @@ export function F_Ticker() {
   }
 }
 
+const _flatCanvasCache = new Map();
+function getFlatCanvas(name) {
+  if (_flatCanvasCache.has(name)) return _flatCanvasCache.get(name);
+  if (typeof document === 'undefined' || playpal_rgba === null) return null;
+  const lumpnum = W_CheckNumForName(name);
+  if (lumpnum < 0) { _flatCanvasCache.set(name, null); return null; }
+  const bytes = W_CacheLumpNum(lumpnum, 0);
+  if (bytes.length < 64 * 64) { _flatCanvasCache.set(name, null); return null; }
+  const tile = document.createElement('canvas');
+  tile.width = 64; tile.height = 64;
+  const tileCtx = tile.getContext('2d');
+  const image = tileCtx.createImageData(64, 64);
+  for (let i = 0; i < 64 * 64; i++) {
+    const pal = bytes[i] * 4;
+    const out = i * 4;
+    image.data[out]     = playpal_rgba[pal];
+    image.data[out + 1] = playpal_rgba[pal + 1];
+    image.data[out + 2] = playpal_rgba[pal + 2];
+    image.data[out + 3] = 255;
+  }
+  tileCtx.putImageData(image, 0, 0);
+  const screen = document.createElement('canvas');
+  screen.width = 320; screen.height = 200;
+  const screenCtx = screen.getContext('2d');
+  screenCtx.fillStyle = screenCtx.createPattern(tile, 'repeat');
+  screenCtx.fillRect(0, 0, 320, 200);
+  _flatCanvasCache.set(name, screen);
+  return screen;
+}
+
 function F_TextWrite(ctx, dx, dy, dw, dh) {
-  const text = TEXTS[gameepisode] || TEXTS[1];
-  ctx.fillStyle = '#000';
-  ctx.fillRect(dx, dy, dw, dh);
-  const lineH = Math.round(dh * 0.04);
+  const background = getFlatCanvas(_finaleFlat);
+  if (background !== null) ctx.drawImage(background, dx, dy, dw, dh);
+  else { ctx.fillStyle = '#000'; ctx.fillRect(dx, dy, dw, dh); }
+  const sx = dw / 320, sy = dh / 200;
+  const lineH = 11 * sy;
   ctx.font = `bold ${lineH}px monospace`;
   ctx.fillStyle = '#ffcf00';
   ctx.textAlign = 'left';
   // f_finale.c:F_TextWrite — `count = (finalecount - 10) / TEXTSPEED`
   // characters revealed so far. Clamped to text length.
-  const maxChars = Math.min(text.length,
+  const maxChars = Math.min(_finaleText.length,
     Math.max(0, ((_finalecount - F_TEXTSTART) / F_TEXTSPEED) | 0));
-  const visible = text.slice(0, maxChars);
+  const visible = _finaleText.slice(0, maxChars);
   const lines = visible.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], dx + dw * 0.08, dy + dh * 0.15 + i * lineH * 1.4);
+    ctx.fillText(lines[i], dx + 10 * sx, dy + (10 + i * 11) * sy);
   }
 }
 
@@ -151,6 +177,7 @@ function F_BunnyScroll(ctx, dx, dy, dw, dh) {
 
 export function F_Drawer(ctx, dx, dy, dw, dh) {
   if (!_active) return;
+  if (_castActive) { F_CastDrawer(ctx, dx, dy, dw, dh); return; }
   if (_stage === 0) { F_TextWrite(ctx, dx, dy, dw, dh); return; }
   // Stage 1: still picture (or bunny scroll for E3).
   if (gameepisode === 3) { F_BunnyScroll(ctx, dx, dy, dw, dh); return; }

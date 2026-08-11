@@ -85,6 +85,16 @@ function installListeners() {
         e.preventDefault?.();
         return;
       }
+      // Finale input is event-driven in the browser. Doom II uses any key after
+      // its 50-tic guard to advance a chapter screen (or start MAP30's cast).
+      // Doom 1's terminal art returns false, allowing Escape to reach the menu.
+      if (ds.gamestate === 2 /*GS_FINALE*/ && e.repeat !== true) {
+        const finale = await import('./f_finale.js');
+        if (finale.F_Responder({ type: 0, data1: e.keyCode | 0 })) {
+          e.preventDefault?.();
+          return;
+        }
+      }
       // Single-shot automap controls.
       if (e.code === 'Tab') {
         (await import('./am_map.js')).AM_Toggle();
@@ -138,6 +148,13 @@ function installListeners() {
     // Recapture pointer lock only during interactive play. Demo playback
     // shouldn't grab the cursor — the user might want to click out.
     const ds = await import('./doomstat.js');
+    if (ds.gamestate === 2 /*GS_FINALE*/) {
+      const finale = await import('./f_finale.js');
+      if (finale.F_Responder({ type: 2, data1: mouseButtons })) {
+        e.preventDefault?.();
+        return;
+      }
+    }
     if (ds.gamestate === 0 /*GS_LEVEL*/ && !ds.demoplayback &&
         document.pointerLockElement !== renderer.domElement) {
       renderer.domElement.requestPointerLock?.();

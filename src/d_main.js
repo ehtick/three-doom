@@ -216,6 +216,19 @@ function D_Display() {
       _wiDrawer(o, dx, dy, dw, dh);
     }
     if (_menuDrawer !== null) _menuDrawer(o, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
+  } else if (gamestate === gamestate_t.GS_FINALE) {
+    if (renderer !== null) renderer.render(scene, camera);
+    const o = getOverlay();
+    const cw = _overlayCanvas.width, ch = _overlayCanvas.height;
+    o.imageSmoothingEnabled = false;
+    o.fillStyle = '#000';
+    o.fillRect(0, 0, cw, ch);
+    if (_fDrawer !== null) {
+      const scale = Math.min(cw / 320, ch / 200);
+      const dw = 320 * scale, dh = 200 * scale;
+      _fDrawer(o, (cw - dw) * 0.5, (ch - dh) * 0.5, dw, dh);
+    }
+    if (_menuDrawer !== null) _menuDrawer(o, 0, 0, cw, ch);
   } else {
     if (renderer !== null) renderer.render(scene, camera);
     I_FinishUpdate();
@@ -258,6 +271,8 @@ let _gReadDemoCmd = null;
 let _wiDrawer  = null;
 let _wiTicker  = null;
 let _wiResponder = null;
+let _fDrawer = null;
+let _fTicker = null;
 let _isStatusBarVisible = null;
 async function D_DoomLoop() {
   _pTicker = (await import('./p_tick.js')).P_Ticker;
@@ -298,6 +313,9 @@ async function D_DoomLoop() {
   _wiDrawer    = wi.WI_Drawer;
   _wiTicker    = wi.WI_Ticker;
   _wiResponder = wi.WI_Responder;
+  const finale = await import('./f_finale.js');
+  _fDrawer = finale.F_Drawer;
+  _fTicker = finale.F_Ticker;
   function frame(now) {
     if (_lastTime === 0) _lastTime = now;
     const dt = (now - _lastTime) / 1000;
@@ -354,6 +372,8 @@ async function D_DoomLoop() {
       } else if (gamestate === gamestate_t.GS_INTERMISSION && _wiTicker !== null) {
         // Drive the intermission counters + 'press key to continue' timer.
         _wiTicker();
+      } else if (gamestate === gamestate_t.GS_FINALE && _fTicker !== null) {
+        _fTicker();
       }
     }
     D_Display();

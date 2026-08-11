@@ -21,6 +21,8 @@ import { P_Random, M_ClearRandom } from './m_random.js';
 import { states, mobjinfo, S_SARG_RUN1, S_SARG_PAIN2,
          MT_BRUISERSHOT, MT_HEADSHOT, MT_TROOPSHOT } from './info.js';
 import { S_PauseSound, S_ResumeSound } from './s_sound.js';
+import { F_StartFinale } from './f_finale.js';
+import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
 
 let _deferred = null; // pending gameaction params
 
@@ -108,9 +110,9 @@ export function G_Ticker() {
       case gameaction_t.ga_loadgame:   G_DoLoadGame();    set_gameaction(gameaction_t.ga_nothing); break;
       case gameaction_t.ga_savegame:   G_DoSaveGame();    set_gameaction(gameaction_t.ga_nothing); break;
       case gameaction_t.ga_playdemo:   G_DoPlayDemo();    break;
-      case gameaction_t.ga_completed:  G_DoCompleted();   set_gameaction(gameaction_t.ga_nothing); break;
-      case gameaction_t.ga_victory:    G_DoVictory();     set_gameaction(gameaction_t.ga_nothing); break;
-      case gameaction_t.ga_worlddone:  G_DoWorldDone();   set_gameaction(gameaction_t.ga_nothing); break;
+      case gameaction_t.ga_completed:  G_DoCompleted();   break;
+      case gameaction_t.ga_victory:    G_DoVictory();     break;
+      case gameaction_t.ga_worlddone:  G_DoWorldDone();   break;
       case gameaction_t.ga_screenshot: M_ScreenShot();    set_gameaction(gameaction_t.ga_nothing); break;
       default: set_gameaction(gameaction_t.ga_nothing); break;
     }
@@ -477,6 +479,9 @@ export function G_DoLoadGame() {
 // to the next map. Handles secret-exit routing (E_M9 ↔ E_M4, MAP15 ↔ MAP31,
 // MAP31 ↔ MAP32, MAP32 → MAP16) and ExM8 → ga_victory for Doom 1.
 export function G_DoCompleted() {
+  // g_game.c:1024 — consume ga_completed before calculating a possible chained
+  // ga_victory. Clearing it in the dispatcher would erase that chained action.
+  set_gameaction(gameaction_t.ga_nothing);
   // p_user: take away cards/powers from each player.
   for (let i = 0; i < players.length; i++) {
     if (playeringame[i] === true && players[i] !== null && players[i] !== undefined) {
@@ -561,22 +566,28 @@ export function G_DoCompleted() {
     pnum:      consoleplayer,
   };
   set_gamestate(gamestate_t.GS_INTERMISSION);
-  // Reset secretexit now that we've consumed it.
-  set_secretexit(false);
   // Tell G_DoWorldDone where to go on press-key.
   set_wmNext(nextMap);
   WI_Start(wbs, () => {
-    // Player pressed past the intermission — advance to the queued map.
-    set_gameaction(gameaction_t.ga_worlddone);
+    // Player pressed past the intermission. G_WorldDone owns Doom II chapter
+    // finale routing before the queued map can be loaded.
+    G_WorldDone();
   });
 }
 export function G_DoVictory() {
-  set_gamestate(gamestate_t.GS_FINALE);
+  F_StartFinale();
 }
 export function G_WorldDone() {
   set_gameaction(gameaction_t.ga_worlddone);
-  // Vanilla also flips into the finale via wminfo.next after the MAP06/11/20/30
-  // commercial breakpoints.
+  if (secretexit === true) {
+    const p = players[consoleplayer];
+    if (p !== null && p !== undefined) p.didsecret = true;
+  }
+  if (F_ShouldStartCommercialFinale(gamemode, gamemap, secretexit)) {
+    // F_StartFinale consumes ga_worlddone. Non-MAP30 Doom II finales restore it
+    // through this callback once the player advances the text screen.
+    F_StartFinale(() => set_gameaction(gameaction_t.ga_worlddone));
+  }
 }
 // G_DoCompleted stashes `wmNext` (0-biased) so G_DoWorldDone knows where to
 // jump. Falls back to gamemap+1 if nothing is queued.
@@ -590,11 +601,9 @@ export function G_DoWorldDone() {
   } else {
     set_gamemap(gamemap + 1);
   }
-  // g_game.c:G_DoWorldDone calls G_DoLoadLevel directly. It must NOT defer via
-  // set_gameaction(ga_loadlevel): the G_Ticker `ga_worlddone` case clears
-  // gameaction right after this returns, which would clobber that queued
-  // action and the next level would never load.
+  // g_game.c:G_DoWorldDone calls G_DoLoadLevel directly.
   G_DoLoadLevel();
+  set_gameaction(gameaction_t.ga_nothing);
 }
 // g_game.c:897 — random DM spawn (vanilla uses P_Random).
 export function G_DeathMatchSpawnPlayer(playernum) {
