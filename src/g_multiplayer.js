@@ -42,6 +42,51 @@ export function G_CollectActivePlayers(players, playeringame) {
   return active;
 }
 
+function G_CopyTiccmd(target, source) {
+  target.forwardmove = source.forwardmove;
+  target.sidemove = source.sidemove;
+  target.angleturn = source.angleturn;
+  target.consistancy = source.consistancy;
+  target.chatchar = source.chatchar;
+  target.buttons = source.buttons;
+}
+
+function G_ClearTiccmd(cmd) {
+  cmd.forwardmove = 0;
+  cmd.sidemove = 0;
+  cmd.angleturn = 0;
+  cmd.consistancy = 0;
+  cmd.chatchar = 0;
+  cmd.buttons = 0;
+}
+
+// d_net.c:NetUpdate supplies a base netcmd before g_game.c:G_Ticker attempts
+// to read each demo command. This browser port owns only the console node, so
+// unavailable remote bases are neutral while the captured console slot gets
+// the locally-built command. The base matters when G_ReadDemoTiccmd sees a
+// marker and deliberately leaves that player's command untouched.
+export function G_StagePlayerTiccmds(
+  players,
+  playeringame,
+  commandConsoleplayer,
+  localTiccmd,
+  demoPlayback,
+) {
+  const activePlayers = G_CollectActivePlayers(players, playeringame);
+  if (activePlayers === null) return null;
+
+  if (demoPlayback === true) {
+    for (const activePlayer of activePlayers) G_ClearTiccmd(activePlayer.cmd);
+  }
+
+  const localPlayer = players[commandConsoleplayer];
+  if (playeringame[commandConsoleplayer] === true &&
+      localPlayer !== undefined && localPlayer !== null) {
+    G_CopyTiccmd(localPlayer.cmd, localTiccmd);
+  }
+  return activePlayers;
+}
+
 // g_game.c:658-669 reads one command per active player, in player-index order.
 export function G_ReadDemoTiccmds(activePlayers, readDemoTiccmd) {
   for (const player of activePlayers) {

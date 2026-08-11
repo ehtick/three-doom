@@ -1,6 +1,7 @@
 import {
   G_EnsurePlayerTopology,
   G_CollectActivePlayers,
+  G_StagePlayerTiccmds,
   G_ReadDemoTiccmds,
   G_WriteDemoTiccmds,
   P_RecordDeathMatchStart,
@@ -53,6 +54,48 @@ Deno.test('empty local topology still defaults to the single player', () => {
   assertEquals(playeringame[0], true, 'local player activated');
   assertEquals(playeringame.slice(1).some(Boolean), false, 'no remote players activated');
   assertEquals(players[0].playerstate, 2, 'local first spawn starts reborn');
+});
+
+Deno.test('demo bases preserve the captured console and neutralize unavailable remotes', () => {
+  const staleRemote = {
+    cmd: {
+      forwardmove: 7, sidemove: -8, angleturn: 1024,
+      consistancy: 99, chatchar: 65, buttons: 0x81,
+    },
+  };
+  const capturedConsole = {
+    cmd: {
+      forwardmove: -1, sidemove: -1, angleturn: -1,
+      consistancy: -1, chatchar: 1, buttons: 1,
+    },
+  };
+  const players = [staleRemote, undefined, capturedConsole, undefined];
+  const playeringame = [true, false, true, false];
+  const local = {
+    forwardmove: 25, sidemove: -12, angleturn: 0x1234,
+    consistancy: -300, chatchar: 90, buttons: 0x81,
+  };
+
+  const commandPlayers = G_StagePlayerTiccmds(
+    players, playeringame, 2, local, true,
+  );
+  assertEquals(commandPlayers.length, 2, 'pre-marker command topology');
+  assertEquals(staleRemote.cmd.forwardmove, 0, 'remote movement base');
+  assertEquals(staleRemote.cmd.angleturn, 0, 'remote angle base');
+  assertEquals(staleRemote.cmd.consistancy, 0, 'remote consistency base');
+  assertEquals(staleRemote.cmd.chatchar, 0, 'remote chat base');
+  assertEquals(staleRemote.cmd.buttons, 0, 'remote special base');
+  for (const field of Object.keys(local)) {
+    assertEquals(capturedConsole.cmd[field], local[field], `captured console ${field}`);
+  }
+
+  // G_CheckDemoStatus leaves slot 0 active but clears slots 1..3. A fresh
+  // collection therefore excludes the old console before special/ticker use.
+  playeringame[1] = playeringame[2] = playeringame[3] = false;
+  const livePlayers = G_CollectActivePlayers(players, playeringame);
+  assertEquals(livePlayers.length, 1, 'post-marker live topology');
+  assertEquals(livePlayers[0], staleRemote, 'only player zero remains live');
+  assertEquals(capturedConsole.cmd.buttons, 0x81, 'terminal local base remains inspectable');
 });
 
 Deno.test('multiplayer demo commands are consumed once per active player in slot order', () => {

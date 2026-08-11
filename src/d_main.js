@@ -46,7 +46,8 @@ import { D_PausePatchPosition, D_ShouldStartWipe } from './d_display_logic.js';
 import { R_CalculateCanvasView, R_GetViewSize } from './r_view.js';
 import { R_DrawViewBorder } from './r_border.js';
 import {
-  G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
+  G_EnsurePlayerTopology, G_CollectActivePlayers, G_StagePlayerTiccmds,
+  G_ReadDemoTiccmds,
   G_WriteDemoTiccmds,
   P_RecordDeathMatchStart, G_CheckSpot as G_RunCheckSpot,
 } from './g_multiplayer.js';
@@ -386,15 +387,6 @@ let _isStatusBarVisible = null;
 // player topology (and reset browser input state) without erasing this tic.
 const _localCommandPlayer = { cmd: doomstat.localcmds[0] };
 
-function D_CopyTiccmd(target, source) {
-  target.forwardmove = source.forwardmove;
-  target.sidemove = source.sidemove;
-  target.angleturn = source.angleturn;
-  target.consistancy = source.consistancy;
-  target.chatchar = source.chatchar;
-  target.buttons = source.buttons;
-}
-
 function D_ClearLoopReferences() {
   _lastTime = 0;
   _ticAccum = 0;
@@ -533,15 +525,20 @@ async function D_DoomLoop() {
       // g_game.c:654-710 — after game actions settle, copy the already-built
       // local command, then let demo playback overwrite it. Commands remain
       // populated through intermissions/finales so those tickers see buttons.
-      const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
-      if (activePlayers !== null) {
-        const localPlayer = players[consoleplayer];
-        if (doomstat.playeringame[consoleplayer] === true &&
-            localPlayer !== undefined && localPlayer !== null) {
-          D_CopyTiccmd(localPlayer.cmd, _localCommandPlayer.cmd);
-        }
+      // Capture the command-phase console slot before a terminal demo marker
+      // resets consoleplayer to zero. In the single-node browser, remote base
+      // netcmds are neutral; the captured local slot receives the live cmd.
+      const commandConsoleplayer = consoleplayer;
+      const commandPlayers = G_StagePlayerTiccmds(
+        players,
+        doomstat.playeringame,
+        commandConsoleplayer,
+        _localCommandPlayer.cmd,
+        doomstat.demoplayback,
+      );
+      if (commandPlayers !== null) {
         if (doomstat.demoplayback && _gReadDemoCmd !== null) {
-          G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
+          G_ReadDemoTiccmds(commandPlayers, _gReadDemoCmd);
         }
         if (doomstat.demorecording && _gWriteDemoCmd !== null) {
           // g_game.c:G_WriteDemoTiccmd checks the live 'q' key before each
@@ -549,13 +546,20 @@ async function D_DoomLoop() {
           // no later player's command is appended after finalization.
           const quitRecording = D_KeyboardInput.isPressed('KeyQ');
           G_WriteDemoTiccmds(
-            activePlayers,
+            commandPlayers,
             (cmd) => _gWriteDemoCmd(cmd, quitRecording),
           );
         }
-        if (_gCheckSpecial !== null) {
-          for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
-        }
+      }
+
+      // G_ReadDemoTiccmd may have reached DEMOMARKER. G_CheckDemoStatus then
+      // clears player slots 1..3 and resets consoleplayer, and vanilla's next
+      // special-button loop re-tests playeringame[] instead of reusing the
+      // command-loop snapshot. The state ticker readiness check must use that
+      // same post-marker topology.
+      const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
+      if (activePlayers !== null && _gCheckSpecial !== null) {
+        for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
       }
 
       if (gamestate === gamestate_t.GS_LEVEL && _pTicker !== null) {

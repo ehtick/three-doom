@@ -6,8 +6,8 @@ Deno.test('demo and live ticcmds are sampled before every state ticker', () => {
   const loop = source.slice(loopStart, loopEnd);
   const build = loop.indexOf('D_KeyboardInput.buildCmd(_localCommandPlayer)');
   const gameTicker = loop.indexOf('_gTicker()');
-  const copy = loop.indexOf('D_CopyTiccmd(localPlayer.cmd, _localCommandPlayer.cmd)');
-  const commands = loop.indexOf('G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd)');
+  const stage = loop.indexOf('G_StagePlayerTiccmds(');
+  const commands = loop.indexOf('G_ReadDemoTiccmds(commandPlayers, _gReadDemoCmd)');
   const level = loop.indexOf('_pTicker()');
   const intermission = loop.indexOf('_wiTicker()');
   const finale = loop.indexOf('_fTicker()');
@@ -16,11 +16,21 @@ Deno.test('demo and live ticcmds are sampled before every state ticker', () => {
       finale < commands || demoPage < commands) {
     throw new Error('ticcmd sampling is not ahead of every state ticker');
   }
-  if (build < 0 || gameTicker < build || copy < gameTicker || commands < copy) {
+  if (build < 0 || gameTicker < build || stage < gameTicker || commands < stage) {
     throw new Error('local ticcmd is not staged before actions and copied before demo overwrite');
   }
   if (!loop.includes('for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer)')) {
     throw new Error('special buttons are not checked for every active player');
+  }
+  const liveCollection = loop.indexOf(
+    'const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame)',
+    commands,
+  );
+  const specials = loop.indexOf(
+    'for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer)',
+  );
+  if (liveCollection < commands || specials < liveCollection || level < liveCollection) {
+    throw new Error('post-demo topology is not refreshed before specials and state tickers');
   }
   const recording = loop.indexOf('G_WriteDemoTiccmds(');
   if (recording < commands || recording > level) {
