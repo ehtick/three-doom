@@ -5,7 +5,8 @@
 // so cmd is written exactly once per tic (in sync with P_PlayerThink).
 
 import { renderer } from './i_video.js';
-import { BT_SPECIAL, BTS_PAUSE } from './d_event.js';
+import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT } from './d_event.js';
+import { D_ComputeMovement } from './d_input_logic.js';
 
 // Cache cross-module references at module load — keystrokes are a hot path
 // and `await import()` per event adds microtask latency. The dynamic-import
@@ -15,17 +16,19 @@ import('./m_menu.js').then((m) => { _mMenu = m; });
 
 const keys = new Set();
 let mouseDX = 0;
+let mouseDY = 0;
 let mouseButtons = 0;
 // g_game.c:262 — two-stage accelerative turning. `turnheld` accumulates the
-// number of tics the user has held a turn key; while it's below SLOWTURNTICS
-// we use the slow-turn rate, after which we fall through to the normal/fast
-// rate.
-const SLOWTURNTICS = 6;
+// number of tics the user has held a turn key; the pure movement helper picks
+// the slow rate for the first six, then the normal/fast rate.
 let turnheld = 0;
 // g_game.c:355 — forward double-click → BT_USE shortcut.
 let dclicks = 0;
 let dclickstate = 0;
 let dclicktime = 0;
+let dclicks2 = 0;
+let dclickstate2 = 0;
+let dclicktime2 = 0;
 // g_game.c:G_Responder — KEY_PAUSE latches sendpause; G_BuildTiccmd (buildCmd)
 // drains it into the next ticcmd as BT_SPECIAL|BTS_PAUSE.
 let sendpause = false;
@@ -131,21 +134,13 @@ function installListeners() {
         const ch = e.code.charAt(3).toLowerCase().charCodeAt(0);
         await import('./m_cheat.js').then(m => m.cht_HandleKey(ch));
       }
-      // Weapon switching: digit keys 1..7 -> wp_fist .. wp_bfg.
+      // Weapon digits are sampled into BT_CHANGE by buildCmd, so recordings
+      // carry the switch in the ticcmd instead of mutating pendingweapon here.
       if (e.code.startsWith('Digit')) {
         // Vanilla ST_Responder feeds every key (digits included) to the cheat
         // sequencer; without this IDMUS could never collect its 2-digit param.
         const digCh = e.code.slice(5).charCodeAt(0); // '0'..'9'
         await import('./m_cheat.js').then(m => m.cht_HandleKey(digCh));
-        const slot = parseInt(e.code.slice(5), 10);
-        if (slot >= 1 && slot <= 7) {
-          const ds = await import('./doomstat.js');
-          const p = ds.players[ds.consoleplayer];
-          if (p !== null && p !== undefined && p.mo !== null) {
-            const wp = slot - 1;
-            if (p.weaponowned[wp]) p.pendingweapon = wp;
-          }
-        }
       }
     });
   document.addEventListener('keyup', (e) => { keys.delete(e.code); });
@@ -167,7 +162,10 @@ function installListeners() {
   });
   document.addEventListener('mouseup', (e) => { mouseButtons &= ~(1 << e.button); });
   document.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement === renderer.domElement) mouseDX += e.movementX;
+    if (document.pointerLockElement === renderer.domElement) {
+      mouseDX += e.movementX;
+      mouseDY -= e.movementY;
+    }
   });
 }
 
@@ -186,7 +184,7 @@ export const D_KeyboardInput = {
   buildFinaleCmd(player) {
     if (player?.cmd === undefined) return;
     player.cmd.buttons = 0;
-    if ((mouseButtons & 1) !== 0 || keys.has('ControlLeft')) player.cmd.buttons |= 1;
+    if ((mouseButtons & 1) !== 0 || keys.has('ControlLeft') || keys.has('ControlRight')) player.cmd.buttons |= 1;
     if (keys.has('Space')) player.cmd.buttons |= 2;
   },
 
@@ -210,35 +208,32 @@ export const D_KeyboardInput = {
     //   sidemove[2]    = { 24, 40 }
     //   angleturn[3]   = { 640, 1280, 320 }  // [normal, fast, slow]
     const fast = keys.has('ShiftLeft') || keys.has('ShiftRight');
-    const fwd  = fast ? 50 : 25;
-    const side = fast ? 40 : 24;
-
     // g_game.c:262 — accumulative turnheld. Slow turn only for the first
     // SLOWTURNTICS tics of the press, then accelerate.
     const turning = keys.has('ArrowLeft') || keys.has('ArrowRight');
     if (turning === true) turnheld++;
     else                  turnheld = 0;
-    const tspeed = (turnheld < SLOWTURNTICS) ? 320 : (fast ? 1280 : 640);
-
-    if (keys.has('KeyW') || keys.has('ArrowUp'))    cmd.forwardmove =  fwd;
-    if (keys.has('KeyS') || keys.has('ArrowDown'))  cmd.forwardmove = -fwd;
-    if (keys.has('KeyD'))                            cmd.sidemove    =  side;
-    if (keys.has('KeyA'))                            cmd.sidemove    = -side;
-    if (keys.has('ArrowLeft'))  cmd.angleturn =  tspeed;
-    if (keys.has('ArrowRight')) cmd.angleturn = -tspeed;
-
-    // Mouse contribution. Clamp to a 16-bit-safe range so cmd.angleturn
-    // (stored as a signed short in demo recordings) doesn't wrap on big spins.
-    let mouseTurn = (mouseDX * 8) | 0;
-    if (mouseTurn >  0x7fff) mouseTurn =  0x7fff;
-    if (mouseTurn < -0x8000) mouseTurn = -0x8000;
-    cmd.angleturn -= mouseTurn;
-    if (cmd.angleturn >  0x7fff) cmd.angleturn =  0x7fff;
-    if (cmd.angleturn < -0x8000) cmd.angleturn = -0x8000;
-    mouseDX = 0;
+    const strafe = keys.has('AltLeft') || keys.has('AltRight') || (mouseButtons & 2) !== 0;
+    const movement = D_ComputeMovement({
+      fast,
+      forward: keys.has('KeyW') || keys.has('ArrowUp'),
+      backward: keys.has('KeyS') || keys.has('ArrowDown'),
+      strafeRight: keys.has('KeyD') || keys.has('Period'),
+      strafeLeft: keys.has('KeyA') || keys.has('Comma'),
+      turnRight: keys.has('ArrowRight'),
+      turnLeft: keys.has('ArrowLeft'),
+      strafe,
+      mouseForward: (mouseButtons & 4) !== 0,
+      mouseX: mouseDX,
+      mouseY: mouseDY,
+    }, turnheld);
+    cmd.forwardmove = movement.forwardmove;
+    cmd.sidemove = movement.sidemove;
+    cmd.angleturn = movement.angleturn;
+    mouseDX = mouseDY = 0;
 
     // Buttons.
-    const attack = (mouseButtons & 1) !== 0 || keys.has('ControlLeft');
+    const attack = (mouseButtons & 1) !== 0 || keys.has('ControlLeft') || keys.has('ControlRight');
     const use    = keys.has('Space');
     if (attack === true) cmd.buttons |= 1; // BT_ATTACK
     if (use === true) {
@@ -246,9 +241,16 @@ export const D_KeyboardInput = {
       dclicks = 0;       // pressing Use cancels any pending forward dclick
     }
 
-    // g_game.c:354 — forward double-click (forward mouse button or W/Up
-    // tapped twice within 20 tics) latches BT_USE. Lets you door-bump
-    // without taking your hand off the move keys.
+    // g_game.c:340 — weapon changes are part of the ticcmd (and therefore
+    // demo/net data), not an immediate pendingweapon side effect.
+    for (let slot = 1; slot <= 8; slot++) {
+      if (!keys.has(`Digit${slot}`)) continue;
+      cmd.buttons |= BT_CHANGE | ((slot - 1) << BT_WEAPONSHIFT);
+      break;
+    }
+
+    // g_game.c:354 — double-clicking the forward mouse button within 20 tics
+    // latches BT_USE. Lets you door-bump without leaving the mouse.
     const forwardDC = (mouseButtons & 4) !== 0; // right-mouse here = forward
     if (forwardDC !== (dclickstate !== 0) && dclicktime > 1) {
       dclickstate = forwardDC ? 1 : 0;
@@ -258,6 +260,17 @@ export const D_KeyboardInput = {
     } else {
       dclicktime++;
       if (dclicktime > 20) { dclicks = 0; dclickstate = 0; }
+    }
+    // Alt/middle-mouse strafe double-click uses the same BT_USE shortcut as
+    // the original second dclick state machine.
+    if (strafe !== (dclickstate2 !== 0) && dclicktime2 > 1) {
+      dclickstate2 = strafe ? 1 : 0;
+      if (dclickstate2 === 1) dclicks2++;
+      if (dclicks2 === 2) { cmd.buttons |= 2 /*BT_USE*/; dclicks2 = 0; }
+      else dclicktime2 = 0;
+    } else {
+      dclicktime2++;
+      if (dclicktime2 > 20) { dclicks2 = 0; dclickstate2 = 0; }
     }
 
     // g_game.c:430 — a queued pause overrides all other buttons this tic.
