@@ -295,6 +295,13 @@ export function R_UpdateSprites() {
     if (entry.sprite.scale.x !== t.w || entry.sprite.scale.y !== t.h) {
       entry.sprite.scale.set(t.w, t.h, 1);
     }
+    // R_ProjectSprite subtracts spriteoffset before projecting either normal
+    // or flipped columns. THREE.Sprite.center expresses that patch origin in
+    // billboard-local space, so it follows the camera-facing right vector
+    // without rebuilding a world-space offset every frame. Flipping changes
+    // only column sampling in vanilla; the projected patch bounds stay fixed.
+    const centerX = t.offsetX / t.w;
+    if (entry.sprite.center.x !== centerX) entry.sprite.center.x = centerX;
     // Vanilla R_ProjectSprite anchors the sprite top at (mobj.z + topoffset)
     // and draws downwards; bottom edge sits at (mobj.z + topoffset - height).
     // Three.Sprite centres on .position, so we shift down by h/2.
