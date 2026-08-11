@@ -694,9 +694,8 @@ export async function D_DoomMain() {
       P_RespawnSpecials: PM.P_RespawnSpecials,
       P_UpdateSpecials: pSpec.P_UpdateSpecials,
     });
-    // P_SetupPsprites is still async (it imports info.js / d_items.js); fire
-    // it but don't block — psprites are visual only, not part of the play sim.
-    _PU.P_SetupPsprites(player);
+    // Clear both overlays and raise the ready weapon from WEAPONBOTTOM.
+    pp.P_SetupPsprites(player);
     D_KeyboardInput.init(player);
   };
   // Expose to G_DoLoadLevel callers (menu New Game) — see g_game.js setExternals.
