@@ -60,6 +60,9 @@ export function G_BuildIntermissionInfo({
       ssecret: player?.secretcount | 0,
       stime: leveltime | 0,
       frags: snapshotFrags(player),
+      // d_player.h:wbplayerstruct_t carries this unused field. Static C
+      // storage leaves it at zero; preserve the complete payload shape.
+      score: 0,
     };
   }
 

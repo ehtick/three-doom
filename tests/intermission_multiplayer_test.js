@@ -66,6 +66,7 @@ Deno.test('G_DoCompleted payload snapshots all four frag rows and vanilla metada
   assertArray(wbs.plyr[1].frags, [4, 1, 0, 0], 'player 2 frag row');
   assertArray(wbs.plyr[2].frags, [0, 0, 0, 0], 'inactive frag row');
   assertEquals(wbs.plyr[1].stime, 4321, 'shared level time');
+  assertEquals(wbs.plyr[1].score, 0, 'unused score field');
   players[0].frags[1] = 99;
   assertEquals(wbs.plyr[0].frags[1], 5, 'frag snapshot is detached');
   assertEquals(G_IntermissionParTime(GameMode_t.registered, 2, 3), TICRATE * 90, 'E2M3 par');
