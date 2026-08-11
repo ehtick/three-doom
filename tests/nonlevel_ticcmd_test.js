@@ -22,7 +22,7 @@ Deno.test('demo and live ticcmds are sampled before every state ticker', () => {
   if (!loop.includes('for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer)')) {
     throw new Error('special buttons are not checked for every active player');
   }
-  const recording = loop.indexOf('G_WriteDemoTiccmds(activePlayers, _gWriteDemoCmd)');
+  const recording = loop.indexOf('G_WriteDemoTiccmds(');
   if (recording < commands || recording > level) {
     throw new Error('recording does not serialize every active command before state tickers');
   }

@@ -544,7 +544,14 @@ async function D_DoomLoop() {
           G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
         }
         if (doomstat.demorecording && _gWriteDemoCmd !== null) {
-          G_WriteDemoTiccmds(activePlayers, _gWriteDemoCmd);
+          // g_game.c:G_WriteDemoTiccmd checks the live 'q' key before each
+          // command. A false result stops a multiplayer tic immediately, so
+          // no later player's command is appended after finalization.
+          const quitRecording = D_KeyboardInput.isPressed('KeyQ');
+          G_WriteDemoTiccmds(
+            activePlayers,
+            (cmd) => _gWriteDemoCmd(cmd, quitRecording),
+          );
         }
         if (_gCheckSpecial !== null) {
           for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);

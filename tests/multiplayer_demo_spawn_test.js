@@ -80,8 +80,17 @@ Deno.test('multiplayer demo commands are recorded once per active player in slot
     { cmd: { slot: 2 } },
   ];
   const writes = [];
-  G_WriteDemoTiccmds(active, (cmd) => writes.push(cmd.slot));
+  const complete = G_WriteDemoTiccmds(active, (cmd) => writes.push(cmd.slot));
+  assertEquals(complete, true, 'complete recording tic');
   assertEquals(writes.join(','), '0,2', 'demo stream order');
+
+  const stoppedWrites = [];
+  const stopped = G_WriteDemoTiccmds(active, (cmd) => {
+    stoppedWrites.push(cmd.slot);
+    return false;
+  });
+  assertEquals(stopped, false, 'recording finalization aborts the tic');
+  assertEquals(stoppedWrites.join(','), '0', 'no command follows finalization');
 });
 
 Deno.test('deathmatch starts retain their real count and cap at ten', () => {

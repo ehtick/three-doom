@@ -306,6 +306,7 @@ export const D_KeyboardInput = {
   installEarly() { installListeners(); },
   resetForLevel() { resetLevelInput(); },
   shutdown() { shutdownListeners(); },
+  isPressed(code) { return keys.has(code); },
 
   // Build the ticcmd from current input. Called once per 35Hz tic.
   // Mirrors g_game.c::G_BuildTiccmd using vanilla's movement tables:

@@ -53,7 +53,10 @@ export function G_ReadDemoTiccmds(activePlayers, readDemoTiccmd) {
 // g_game.c:658-669 records immediately after the optional demo read, using
 // the same ascending active-player order as the stream header topology.
 export function G_WriteDemoTiccmds(activePlayers, writeDemoTiccmd) {
-  for (const player of activePlayers) writeDemoTiccmd(player.cmd);
+  for (const player of activePlayers) {
+    if (writeDemoTiccmd(player.cmd) === false) return false;
+  }
+  return true;
 }
 
 // p_mobj.c:717-725 — copy a type-11 mapthing into the fixed ten-entry array

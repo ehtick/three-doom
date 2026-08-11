@@ -24,9 +24,15 @@ import { S_PauseSound, S_ResumeSound } from './s_sound.js';
 import { F_StartFinale } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
 import { G_SecretExitAvailable } from './g_game_logic.js';
-import { G_DecodeDemoTiccmd, G_EncodeDemoTiccmd } from './g_demo.js';
+import {
+  DEMO_DEFAULT_BUFFER_SIZE,
+  G_DecodeDemoTiccmd,
+  G_DemoCanWriteTiccmd,
+  G_EncodeDemoTiccmd,
+} from './g_demo.js';
 import { G_BeginTimeDemoSample, G_CompleteTimeDemoSample } from './g_timedemo.js';
 import { I_Error, I_GetTime } from './i_system.js';
+import { M_CheckParm, myargc, myargv } from './m_argv.js';
 import { W_CheckNumForName } from './w_wad.js';
 import {
   G_DeathMatchSpawnPlayer as G_RunDeathMatchSpawnPlayer,
@@ -489,54 +495,104 @@ export function G_TimeDemo(nameOrBytes) {
 export function G_GetTimeDemoResult() { return _timeDemoResult; }
 export function G_SetTimeDemoEndCallback(fn) { _onTimeDemoEnd = fn; }
 
-// G_CheckDemoStatus — called when the DEMOMARKER is hit. Stop playback,
-// reset all the global flags vanilla's G_CheckDemoStatus zeroes so the
-// next session/demo doesn't inherit demo1's fast/respawn/netgame state,
-// and hand control back to the title-screen attract sequence.
-export function G_CheckDemoStatus() {
-  if (doomstat.demoplayback !== true) return false;
-  let timeDemoResult = null;
-  if (doomstat.timingdemo === true && _timeDemoSample !== null) {
-    timeDemoResult = G_CompleteTimeDemoSample(_timeDemoSample, gametic, I_GetTime());
-    _timeDemoResult = timeDemoResult;
-  }
-  if (doomstat.timingdemo === true) {
-    doomstat.set_timingdemo(false);
-    doomstat.set_singletics(false);
-    _timeDemoSample = null;
-  }
-  doomstat.set_demoplayback(false);
-  doomstat.set_netgame?.(false);
-  doomstat.set_deathmatch?.(0);
-  doomstat.set_respawnparm?.(false);
-  doomstat.set_fastparm?.(false);
-  doomstat.set_nomonsters?.(false);
-  if (doomstat.playeringame !== undefined) {
-    for (let i = 1; i < MAXPLAYERS; i++) doomstat.playeringame[i] = false;
-  }
-  doomstat.set_consoleplayer?.(0);
-  doomstat.set_singledemo(false);
-  _demoBytes = null; _demoPos = 0;
-  if (timeDemoResult !== null) {
-    console.info(timeDemoResult.message);
-    if (_onTimeDemoEnd !== null) _onTimeDemoEnd(timeDemoResult);
-    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' &&
-        typeof CustomEvent === 'function') {
-      window.dispatchEvent(new CustomEvent('doom:timedemo', { detail: timeDemoResult }));
+// G_CheckDemoStatus — the single playback/recording finalizer. A playback
+// marker resets the session flags and returns to the attract loop; recording
+// stop paths append their one marker and publish the browser-owned result.
+export function G_CheckDemoStatus(reason = 'status') {
+  if (doomstat.demoplayback === true) {
+    let timeDemoResult = null;
+    if (doomstat.timingdemo === true && _timeDemoSample !== null) {
+      timeDemoResult = G_CompleteTimeDemoSample(_timeDemoSample, gametic, I_GetTime());
+      _timeDemoResult = timeDemoResult;
     }
+    if (doomstat.timingdemo === true) {
+      doomstat.set_timingdemo(false);
+      doomstat.set_singletics(false);
+      _timeDemoSample = null;
+    }
+    doomstat.set_demoplayback(false);
+    doomstat.set_netgame?.(false);
+    doomstat.set_deathmatch?.(0);
+    doomstat.set_respawnparm?.(false);
+    doomstat.set_fastparm?.(false);
+    doomstat.set_nomonsters?.(false);
+    if (doomstat.playeringame !== undefined) {
+      for (let i = 1; i < MAXPLAYERS; i++) doomstat.playeringame[i] = false;
+    }
+    doomstat.set_consoleplayer?.(0);
+    doomstat.set_singledemo(false);
+    _demoBytes = null; _demoPos = 0;
+    if (timeDemoResult !== null) {
+      console.info(timeDemoResult.message);
+      if (_onTimeDemoEnd !== null) _onTimeDemoEnd(timeDemoResult);
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' &&
+          typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('doom:timedemo', { detail: timeDemoResult }));
+      }
+    }
+    if (_onDemoEnd !== null) _onDemoEnd();
+    return true;
   }
-  if (_onDemoEnd !== null) _onDemoEnd();
-  return true;
+
+  if (doomstat.demorecording === true && _recordBuf !== null) {
+    G_FinalizeDemoRecording(reason);
+  }
+  return false;
 }
 export function G_SetDemoEndCallback(fn) { _onDemoEnd = fn; }
 
-// Demo recording — append ticcmd bytes to a buffer; user can pull the result
-// via G_StopDemo(). Mirrors vanilla g_game.c::G_WriteDemoTiccmd.
+// Demo recording — append ticcmd bytes to a buffer; callers can retrieve the
+// last finalized result through G_StopDemo() or G_GetDemoRecordingResult().
+// Mirrors vanilla g_game.c::G_WriteDemoTiccmd/G_CheckDemoStatus.
 let _recordBuf = null, _recordName = '';
-export function G_RecordDemo(name) {
+let _recordMaxBytes = DEMO_DEFAULT_BUFFER_SIZE;
+let _recordResult = null;
+let _onRecordingEnd = null;
+
+function G_CommandLineDemoMaxBytes() {
+  const parm = M_CheckParm('-maxdemo');
+  if (parm !== 0 && parm < myargc - 1) {
+    const kibibytes = Number.parseInt(myargv[parm + 1], 10);
+    if (Number.isFinite(kibibytes) && kibibytes > 0) return kibibytes * 1024;
+  }
+  return DEMO_DEFAULT_BUFFER_SIZE;
+}
+
+function G_FinalizeDemoRecording(reason = 'status') {
+  if (doomstat.demorecording !== true || _recordBuf === null) return _recordResult;
+  // Clear ownership before callbacks: a re-entrant stop/status check must see
+  // an already-finalized recording and cannot append a second marker.
+  doomstat.set_demorecording(false);
+  const buffer = _recordBuf;
+  _recordBuf = null;
+  buffer.push(DEMOMARKER);
+  const normalizedReason = ['manual', 'quit', 'overflow', 'replaced'].includes(reason)
+    ? reason
+    : 'status';
+  _recordResult = Object.freeze({
+    name: _recordName,
+    filename: `${_recordName}.lmp`,
+    reason: normalizedReason,
+    bytes: new Uint8Array(buffer),
+  });
+  if (_onRecordingEnd !== null) _onRecordingEnd(_recordResult);
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' &&
+      typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('doom:demorecorded', { detail: _recordResult }));
+  }
+  return _recordResult;
+}
+
+export function G_RecordDemo(name, maxBytes = null) {
+  if (doomstat.demorecording === true) G_CheckDemoStatus('replaced');
   doomstat.set_usergame(false);
   doomstat.set_demorecording(true);
-  _recordName = name;
+  _recordName = String(name ?? 'demo');
+  const configuredMax = maxBytes === null ? G_CommandLineDemoMaxBytes() : Number(maxBytes);
+  _recordMaxBytes = Number.isFinite(configuredMax)
+    ? Math.max(14, Math.trunc(configuredMax))
+    : DEMO_DEFAULT_BUFFER_SIZE;
+  _recordResult = null;
   _recordBuf = [];
   _recordBuf.push(DEMO_VERSION, gameskill, gameepisode, gamemap,
                   doomstat.deathmatch,
@@ -546,8 +602,21 @@ export function G_RecordDemo(name) {
                   consoleplayer);
   for (let i = 0; i < MAXPLAYERS; i++) _recordBuf.push(playeringame[i] ? 1 : 0);
 }
-export function G_WriteDemoTiccmd(cmd) {
-  if (_recordBuf === null) return;
+export function G_WriteDemoTiccmd(cmd, quitRequested = false) {
+  if (doomstat.demorecording !== true || _recordBuf === null) return false;
+  // Native checks gamekeydown['q'] before touching demo_p, then exits through
+  // I_Error after finalization. The browser keeps running, so report `quit`
+  // and return false to prevent this or any later player command being added.
+  if (quitRequested === true) {
+    G_CheckDemoStatus('quit');
+    return false;
+  }
+  if (G_DemoCanWriteTiccmd(_recordBuf.length, _recordMaxBytes) !== true) {
+    // Native's fixed allocation terminates the process here. Finalize the
+    // valid prefix and expose an overflow result instead.
+    G_CheckDemoStatus('overflow');
+    return false;
+  }
   // g_game.c:1506-1522 writes four bytes, rewinds demo_p, then reads those
   // bytes back into the live command. Besides rounding angleturn to the
   // nearest 256, that round-trip applies signed char/short narrowing before
@@ -555,15 +624,14 @@ export function G_WriteDemoTiccmd(cmd) {
   const offset = _recordBuf.length;
   _recordBuf.push(...G_EncodeDemoTiccmd(cmd));
   G_DecodeDemoTiccmd(_recordBuf, offset, cmd);
+  return true;
 }
 export function G_StopDemo() {
-  if (_recordBuf === null) return null;
-  _recordBuf.push(0x80 /*DEMOMARKER*/);
-  const out = new Uint8Array(_recordBuf);
-  _recordBuf = null;
-  doomstat.set_demorecording(false);
-  return { name: _recordName, bytes: out };
+  if (doomstat.demorecording === true) G_CheckDemoStatus('manual');
+  return _recordResult;
 }
+export function G_GetDemoRecordingResult() { return _recordResult; }
+export function G_SetDemoRecordingEndCallback(fn) { _onRecordingEnd = fn; }
 
 // Save/Load orchestration — defer to p_saveg.
 let _savegSlot = 0, _savegDesc = '';

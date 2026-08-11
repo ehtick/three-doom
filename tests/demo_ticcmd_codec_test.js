@@ -1,4 +1,8 @@
-import { G_DecodeDemoTiccmd, G_EncodeDemoTiccmd } from '../src/g_demo.js';
+import {
+  G_DecodeDemoTiccmd,
+  G_DemoCanWriteTiccmd,
+  G_EncodeDemoTiccmd,
+} from '../src/g_demo.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -50,4 +54,11 @@ Deno.test('demo ticcmd decoder honors a stream offset', () => {
   assertEquals(cmd.sidemove, -128, 'signed side');
   assertEquals(cmd.angleturn, -256, 'signed angle');
   assertEquals(cmd.buttons, 0xa5, 'buttons');
+});
+
+Deno.test('demo capacity preserves the reference sixteen-byte tail reserve', () => {
+  assertEquals(G_DemoCanWriteTiccmd(13, 29), true, 'exact reserve boundary');
+  assertEquals(G_DemoCanWriteTiccmd(14, 29), false, 'first byte beyond boundary');
+  assertEquals(G_DemoCanWriteTiccmd(0x1fff0, 0x20000), true, 'default final start');
+  assertEquals(G_DemoCanWriteTiccmd(0x1fff1, 0x20000), false, 'default overflow');
 });
