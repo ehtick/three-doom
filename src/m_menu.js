@@ -33,6 +33,7 @@ import { V_PaletteCSS } from './v_palette.js';
 import { I_SetPalette } from './i_video.js';
 import { W_CacheLumpName } from './w_wad.js';
 import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4 } from './d_englsh.js';
+import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 const getPatch = V_DecodePatchToCanvas;
 const GAMMA_MESSAGES = [GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4];
 
@@ -186,14 +187,23 @@ export function M_SetExternals(refs) {
 function _notifyVolume() { if (_onVolumeChanged) _onVolumeChanged(sfxVolume, musicVolume); }
 
 // ---------- Modal message prompt ----------
-let _message = null;    // { text, yes:fn, no:fn }
+let _message = null;    // { text, routine, input, lastMenuActive }
 let _input = false;     // input echo for save slot edit
 let _saveEditingSlot = -1;
 
 export function M_StartMessage(text, routine, input) {
-  _message = { text, routine, input: input === true };
+  _message = {
+    text,
+    routine,
+    input: input === true,
+    lastMenuActive: menuactive,
+  };
+  set_menuactive(true);
 }
-export function M_StopMessage() { _message = null; }
+export function M_StopMessage() {
+  if (_message !== null) set_menuactive(_message.lastMenuActive);
+  _message = null;
+}
 
 // ---------- Navigation ----------
 // m_menu.c:166 menu_t.lastOn — each menu remembers the cursor position the user
@@ -222,7 +232,7 @@ function _moveCursor(m, delta) {
 
 function _chooseEpisode(ep) {
   if (gamemode === GameMode_t.shareware && ep > 1) {
-    M_StartMessage('This is the shareware version of DOOM.\nYou need to order to play three more episodes.\n\n(Press y to order)\n(Press n to cancel)', () => {}, true);
+    M_StartMessage('This is the shareware version of DOOM.\nYou need to order to play three more episodes.\n\n(Press y to order)\n(Press n to cancel)', null, false);
     return;
   }
   _pendingEpisode = ep;
@@ -232,9 +242,9 @@ function _chooseEpisode(ep) {
 let _pendingEpisode = 1;
 function _chooseSkill(skill) {
   if (skill === 4) {
-    M_StartMessage('Are you sure? This skill level\nisn\'t even remotely fair.\n\n(Press y to confirm)', (yes) => {
-      if (yes) _doStart(skill);
-    }, false);
+    M_StartMessage('Are you sure? This skill level\nisn\'t even remotely fair.\n\n(Press y to confirm)', (key) => {
+      if (key === 0x79 /*y*/) _doStart(skill);
+    }, true);
     return;
   }
   _doStart(skill);
@@ -268,9 +278,9 @@ function M_QuitDOOM() {
   // m_menu.c:1105 — deterministic by gametic so it's reproducible per session.
   const gametic = (globalThis.__doom_gametic | 0);
   const idx = (gametic % (QUIT_MESSAGES.length - 1)) + 1;
-  M_StartMessage(QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y to quit)', (yes) => {
-    if (yes) I_Quit();
-  }, false);
+  M_StartMessage(QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y to quit)', (key) => {
+    if (key === 0x79 /*y*/) I_Quit();
+  }, true);
 }
 
 // ---------- Lifecycle ----------
@@ -322,11 +332,19 @@ export function M_Responder(ev) {
   if (ev === undefined || ev === null) return false;
   if (ev.type !== 0 /*ev_keydown*/) return false;
   const key = ev.data1;
-  // Modal message handling: y/n only.
+  // m_menu.c:1494-1512 — informational messages dismiss on any key. Prompts
+  // that need input accept only Space/N/Y/Escape; every other key falls
+  // through to the remaining responders.
   if (_message !== null) {
-    // m_menu.c:1507 — any dismissal of a modal message plays sfx_swtchx.
-    if (key === 0x79 /*y*/ || key === 13) { _message.routine?.(true);  _message = null; S_StartSound(null, sfx_swtchx); return true; }
-    if (key === 0x6e /*n*/ || key === KEY_ESCAPE) { _message.routine?.(false); _message = null; S_StartSound(null, sfx_swtchx); return true; }
+    if (M_MessageAcceptsKey(_message.input, key) !== true) return false;
+    const message = _message;
+    set_menuactive(message.lastMenuActive);
+    _message = null;
+    message.routine?.(key);
+    // Vanilla closes the control panel after every message dismissal, even
+    // when the message was opened from an active submenu.
+    set_menuactive(false);
+    S_StartSound(null, sfx_swtchx);
     return true;
   }
   // m_menu.c:1522-1534 — closed-map +/- are global view-size shortcuts.
