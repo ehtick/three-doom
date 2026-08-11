@@ -620,7 +620,7 @@ export async function D_DoomMain() {
     if (ds.nomonsters === true &&
         (i === 19 /*MT_SKULL*/ || (mobjinfo[i].flags & MF_COUNTKILL) !== 0)) return null;
     // Deathmatch hides keys/players (MF_NOTDMATCH).
-    if (ds.deathmatch === true && (mobjinfo[i].flags & MF_NOTDMATCH) !== 0) return null;
+    if (ds.deathmatch !== 0 && (mobjinfo[i].flags & MF_NOTDMATCH) !== 0) return null;
     const x = mt.x << 16;
     const y = mt.y << 16;
     const z = (mobjinfo[i].flags & MF_SPAWNCEILING) !== 0 ? ONCEILINGZ : ONFLOORZ;
