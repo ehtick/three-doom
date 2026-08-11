@@ -36,6 +36,7 @@ try {
     const keyboard = await import('/src/d_keyboard.js');
     const events = await import('/src/d_event.js');
     const doomstat = await import('/src/doomstat.js');
+    const finale = await import('/src/f_finale.js');
     const game = await import('/src/g_game.js');
     const menu = await import('/src/m_menu.js');
     const loop = await import('/src/d_loop.js');
@@ -199,6 +200,18 @@ try {
     doomstat.set_demoplayback(false);
     doomstat.set_gamestate(0 /*GS_LEVEL*/);
 
+    // F_Responder precedes KEY_PAUSE during the MAP30 cast. Pause must kill
+    // the actor and be consumed instead of latching BT_SPECIAL|BTS_PAUSE.
+    menu.M_ClearMenus();
+    finale.F_StartFinale();
+    finale.F_StartCast();
+    key('keydown', 'Pause', 'Pause');
+    const castPause = sample();
+    key('keyup', 'Pause', 'Pause');
+    const castWasActive = finale.F_CastActive();
+    finale.F_Shutdown();
+    doomstat.set_gamestate(0 /*GS_LEVEL*/);
+
     const netgameDuringCheck = doomstat.netgame;
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
@@ -228,6 +241,8 @@ try {
       demoKeyboardMenu,
       demoMouse,
       demoMouseMenu,
+      castPause,
+      castWasActive,
     };
   });
 
@@ -272,6 +287,9 @@ try {
   }
   if (!zero(result.demoMouse) || result.demoMouseMenu !== true) {
     failures.push(`demo-intermission mouse leaked or missed menu: ${JSON.stringify(result.demoMouse)}`);
+  }
+  if (!zero(result.castPause) || result.castWasActive !== true) {
+    failures.push(`cast did not consume Pause before ticcmd capture: ${JSON.stringify(result.castPause)}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

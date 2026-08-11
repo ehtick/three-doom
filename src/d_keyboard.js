@@ -20,6 +20,8 @@ import * as doomstat from './doomstat.js';
 // dance is only needed at startup to break the i_video ↔ m_menu cycle.
 let _mMenu = null;
 import('./m_menu.js').then((m) => { _mMenu = m; });
+let _fFinale = null;
+import('./f_finale.js').then((f) => { _fFinale = f; });
 
 const keys = new Set();
 let mouseDX = 0;
@@ -80,6 +82,18 @@ async function onKeyDown(e) {
         e.preventDefault?.();
         return;
       }
+      // g_game.c:G_Responder gives F_Responder precedence over gamekeydown
+      // and KEY_PAUSE. During MAP30's cast it consumes every keydown to enter
+      // (or remain in) the actor's death sequence.
+      if (doomstat.gamestate === 2 /*GS_FINALE*/ && doomstat.menuactive !== true) {
+        const finale = _fFinale ?? await import('./f_finale.js');
+        _fFinale = finale;
+        if (listenerIsActive(generation) !== true) return;
+        if (finale.F_Responder({ type: evtype_t.ev_keydown, data1: doomKey, data2: 0, data3: 0 })) {
+          e.preventDefault?.();
+          return;
+        }
+      }
       keys.add(e.code);
       // g_game.c:G_Responder handles KEY_PAUSE without a gamestate guard once
       // attract/demo input has been intercepted above. The next complete
@@ -97,18 +111,10 @@ async function onKeyDown(e) {
         e.preventDefault?.();
         return;
       }
-      // Outside the MAP30 cast, finales advance from held attack/use buttons
-      // sampled into ticcmds—not arbitrary key events. Consume other keys so
-      // they cannot leak into automap, cheats, or weapon selection. Escape was
-      // already offered to the global menu responder above.
+      // Non-cast finales sample complete ticcmds, but must not route the same
+      // DOM keydown into automap, cheats, or direct weapon handlers. Escape
+      // was already offered to the global menu responder above.
       if (doomstat.gamestate === 2 /*GS_FINALE*/ && doomstat.menuactive !== true) {
-        const finale = await import('./f_finale.js');
-        if (listenerIsActive(generation) !== true) return;
-        if (e.code !== 'Escape' && e.repeat !== true &&
-            finale.F_Responder({ type: 0, data1: e.keyCode | 0 })) {
-          e.preventDefault?.();
-          return;
-        }
         if (e.code !== 'Escape') {
           e.preventDefault?.();
           return;
