@@ -215,7 +215,12 @@ try {
   if (!result.listenerInactive) failures.push('keyboard listener remained active');
   if (!result.intermissionReloaded) failures.push('intermission Canvas reload failed');
   if (!result.wasPointerLocked || !result.menuWasClosed || !pointerState.released || !pointerState.menuStillClosed) {
-    failures.push('pointer lock was not released cleanly');
+    failures.push(`pointer lock was not released cleanly: ${JSON.stringify({
+      wasPointerLocked: result.wasPointerLocked,
+      menuWasClosed: result.menuWasClosed,
+      released: pointerState.released,
+      menuStillClosed: pointerState.menuStillClosed,
+    })}`);
   }
   if (!result.loopStopped || afterTic !== result.stoppedTic) failures.push(`RAF loop advanced (${result.stoppedTic} -> ${afterTic})`);
   if (!early.clean || !early.loopClosed || earlyAfterTic !== early.gametic) {

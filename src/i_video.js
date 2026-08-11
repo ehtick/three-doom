@@ -243,6 +243,10 @@ export function I_ShutdownGraphics() {
     try { hook(); } catch (error) { cleanupErrors.push(error); }
   }
   _shutdownHooks.clear();
+  // An input event can synchronously open the menu in the same task that
+  // requests shutdown. Once input continuations have been invalidated above,
+  // clear that UI state so quitting cannot leave doomstat.menuactive latched.
+  try { _mMenu?.M_ClearMenus(); } catch (error) { cleanupErrors.push(error); }
   mouseButtons = 0;
 
   _shutdownPromise = (async () => {
