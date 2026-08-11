@@ -44,6 +44,7 @@ try {
     const lightLogic = await import('/src/r_light_logic.js');
     const spriteLogic = await import('/src/r_sprite_logic.js');
     const psprite = await import('/src/r_psprite.js');
+    const { FRACUNIT } = await import('/src/m_fixed.js');
     const sky = await import('/src/r_sky.js');
     const info = await import('/src/info.js');
     const overlay = document.getElementById('overlay');
@@ -255,9 +256,11 @@ try {
     }
 
     // Exercise the actual R_DrawPlayerSprites call site with one live E1M1
-    // weapon state. Normal b9/b11 draws must equal their forced reference
-    // rows and differ from the other width's legacy row; this catches a
-    // missing scaledviewwidth argument in r_psprite.js itself.
+    // weapon state at the source WEAPONTOP position. During startup the live
+    // S_PISTOLUP sy moves from WEAPONBOTTOM to WEAPONTOP over several tics;
+    // copying that transient coordinate can leave the patch correctly clipped
+    // below b9 (or even b11) depending on headless frame timing. Canonical
+    // ready coordinates keep this check focused on width-specific lighting.
     const player = doomstat.players[doomstat.consoleplayer];
     const livePsp = player.psprites.find((candidate) =>
       candidate?.state !== null && candidate?.state !== undefined &&
@@ -268,7 +271,7 @@ try {
     const pspriteFixture = {
       mo: { subsector: { sector: { lightlevel: 128 } } },
       powers: new Array(6).fill(0),
-      psprites: [{ state: livePsp.state, sx: livePsp.sx, sy: livePsp.sy }],
+      psprites: [{ state: livePsp.state, sx: FRACUNIT, sy: 32 * FRACUNIT }],
       fixedcolormap: 0,
       extralight: 0,
     };
