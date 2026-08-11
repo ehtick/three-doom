@@ -1,7 +1,8 @@
 import { GameMode_t } from '../src/doomdef.js';
 import { C1TEXT, C4TEXT, C5TEXT, C6TEXT, E1TEXT, E4TEXT } from '../src/d_englsh.js';
 import {
-  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldStartCommercialFinale,
+  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
+  F_ShouldStartCommercialFinale,
 } from '../src/f_finale_logic.js';
 
 function assertEquals(actual, expected, message) {
@@ -51,4 +52,11 @@ Deno.test('Doom 1 ending art follows game mode and episode', () => {
   assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 2), 'VICTORY2', 'E2');
   assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 3), null, 'E3 bunny');
   assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 4), 'ENDPIC', 'E4');
+});
+
+Deno.test('commercial finale skipping polls held ticcmd buttons after 50 tics', () => {
+  assertEquals(F_ShouldAdvanceCommercial(50, [1, 0, 0, 0]), false, 'guard includes tic 50');
+  assertEquals(F_ShouldAdvanceCommercial(51, [0, 0, 0, 0]), false, 'movement/no buttons');
+  assertEquals(F_ShouldAdvanceCommercial(51, [1, 0, 0, 0]), true, 'held attack');
+  assertEquals(F_ShouldAdvanceCommercial(51, [0, 2, 0, 0]), true, 'held use from another player');
 });

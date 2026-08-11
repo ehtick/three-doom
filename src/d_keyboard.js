@@ -85,12 +85,18 @@ function installListeners() {
         e.preventDefault?.();
         return;
       }
-      // Finale input is event-driven in the browser. Doom II uses any key after
-      // its 50-tic guard to advance a chapter screen (or start MAP30's cast).
-      // Doom 1's terminal art returns false, allowing Escape to reach the menu.
-      if (ds.gamestate === 2 /*GS_FINALE*/ && e.repeat !== true) {
+      // Outside the MAP30 cast, finales advance from held attack/use buttons
+      // sampled into ticcmds—not arbitrary key events. Consume other keys so
+      // they cannot leak into automap, cheats, or weapon selection. Escape may
+      // still reach the menu, matching the global menu responder.
+      if (ds.gamestate === 2 /*GS_FINALE*/ && ds.menuactive !== true) {
         const finale = await import('./f_finale.js');
-        if (finale.F_Responder({ type: 0, data1: e.keyCode | 0 })) {
+        if (e.code !== 'Escape' && e.repeat !== true &&
+            finale.F_Responder({ type: 0, data1: e.keyCode | 0 })) {
+          e.preventDefault?.();
+          return;
+        }
+        if (e.code !== 'Escape') {
           e.preventDefault?.();
           return;
         }
@@ -149,11 +155,10 @@ function installListeners() {
     // shouldn't grab the cursor — the user might want to click out.
     const ds = await import('./doomstat.js');
     if (ds.gamestate === 2 /*GS_FINALE*/) {
-      const finale = await import('./f_finale.js');
-      if (finale.F_Responder({ type: 2, data1: mouseButtons })) {
-        e.preventDefault?.();
-        return;
-      }
+      // Mouse attack remains visible to the per-tic finale command sampler;
+      // cast death input is keyboard-only in f_finale.c.
+      e.preventDefault?.();
+      return;
     }
     if (ds.gamestate === 0 /*GS_LEVEL*/ && !ds.demoplayback &&
         document.pointerLockElement !== renderer.domElement) {
@@ -175,6 +180,15 @@ export function D_AcquirePointerLock() {
 export const D_KeyboardInput = {
   init(_player) { installListeners(); },
   installEarly() { installListeners(); },
+
+  // Finale F_Ticker reads player.cmd.buttons exactly like linuxdoom. Movement
+  // is irrelevant here, so sample only the controls that can set ticcmd bits.
+  buildFinaleCmd(player) {
+    if (player?.cmd === undefined) return;
+    player.cmd.buttons = 0;
+    if ((mouseButtons & 1) !== 0 || keys.has('ControlLeft')) player.cmd.buttons |= 1;
+    if (keys.has('Space')) player.cmd.buttons |= 2;
+  },
 
   // Build the ticcmd from current input. Called once per 35Hz tic.
   // Mirrors g_game.c::G_BuildTiccmd using vanilla's movement tables:

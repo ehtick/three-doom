@@ -6,6 +6,7 @@
 
 import {
   gameepisode, gamemode, gamemap,
+  players,
   set_automapactive, set_gameaction, set_gamestate, set_viewactive,
 } from './doomstat.js';
 import { GameMode_t, gamestate_t } from './doomdef.js';
@@ -15,7 +16,9 @@ import { S_ChangeMusic, S_StartMusic } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
 import { W_CacheLumpNum, W_CheckNumForName } from './w_wad.js';
 import { playpal_rgba } from './r_data.js';
-import { F_GetDoom1ArtPatch, F_GetFinaleSpec } from './f_finale_logic.js';
+import {
+  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
+} from './f_finale_logic.js';
 
 // State machine: 0 = typing text, 1 = post-text still / bunny scroll.
 let _stage = 0;
@@ -47,6 +50,11 @@ export function F_StartFinale(onDone) {
   _finaleText = spec.text;
   _finaleFlat = spec.flat;
   _commercial = gamemode === GameMode_t.commercial;
+  // The browser rebuilds the local finale ticcmd from held controls each tic.
+  // Clear the previous level's last command first so stale buttons cannot skip.
+  for (const player of players) {
+    if (player?.cmd !== undefined) player.cmd.buttons = 0;
+  }
   // f_finale.c:113 — Doom 1 (shareware/registered/retail) plays mus_victor on
   // the end-of-episode text screen; commercial/indeterminate use mus_read_m.
   const isDoom1 = gamemode === GameMode_t.shareware ||
@@ -58,28 +66,27 @@ export function F_StartFinale(onDone) {
 export function F_Responder(ev) {
   if (!_active) return false;
   if (_castActive) return F_CastResponder(ev);
-  if (ev === null || ev === undefined) return false;
-  const pressed = ev.type === 0 || (ev.type === 2 && ev.data1 !== 0);
-  if (!pressed) return false;
-  // Vanilla polls ticcmd buttons after 50 tics. DOM input is event-driven, so
-  // an equivalent key or mouse press advances once the same guard has elapsed.
-  if (_commercial && _finalecount > 50) {
-    if (gamemap === 30) F_StartCast();
-    else {
-      _active = false;
-      _done(); // G_WorldDone supplied a ga_worlddone callback.
-    }
-    return true;
-  }
-  // Doom 1 episode art is intentionally terminal, matching F_Responder in C.
+  // f_finale.c:F_Responder only handles cast keydowns. Chapter skipping is
+  // driven by ticcmd buttons in F_Ticker, so movement/weapon keys cannot skip.
   return false;
 }
 
 export function F_Ticker() {
   if (_active === false) return;
+  if (_commercial && !_castActive) {
+    const buttons = players.map((player) => player?.cmd?.buttons ?? 0);
+    if (F_ShouldAdvanceCommercial(_finalecount, buttons)) {
+      if (gamemap === 30) F_StartCast();
+      else {
+        _active = false;
+        _done(); // G_WorldDone supplied a ga_worlddone callback.
+        return;
+      }
+    }
+  }
   _finalecount++;
   if (_castActive) { F_CastTicker(); return; }
-  // Doom II holds its text screen until input; MAP30 then enters the cast.
+  // Doom II holds its text screen until a ticcmd button; MAP30 enters the cast.
   if (_commercial) return;
   if (_stage === 0 && _finalecount > F_TEXTWAIT + _finaleText.length * F_TEXTSPEED) {
     _stage = 1;

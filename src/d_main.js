@@ -374,6 +374,7 @@ async function D_DoomLoop() {
         // Drive the intermission counters + 'press key to continue' timer.
         _wiTicker();
       } else if (gamestate === gamestate_t.GS_FINALE && _fTicker !== null) {
+        D_KeyboardInput.buildFinaleCmd(players[consoleplayer]);
         _fTicker();
       }
     }

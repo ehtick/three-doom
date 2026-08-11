@@ -50,3 +50,10 @@ export function F_GetDoom1ArtPatch(mode, episode) {
   if (episode === 4) return 'ENDPIC';
   return null;
 }
+
+// f_finale.c:F_Ticker polls ticcmd buttons, not raw keyboard events. Keeping
+// the 50-tic guard separate makes held attack/use input survive until the
+// first tic on which skipping is allowed.
+export function F_ShouldAdvanceCommercial(finaleCount, buttons) {
+  return finaleCount > 50 && buttons.some((value) => value !== 0);
+}
