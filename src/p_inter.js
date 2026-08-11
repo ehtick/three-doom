@@ -15,7 +15,8 @@ import { MT_MISC0, MT_MISC1, MT_MISC2, MT_MISC3, MT_MISC4, MT_MISC5, MT_MISC6,
 import { ammotype_t, weapontype_t, skill_t } from './doomdef.js';
 import { P_Random } from './m_random.js';
 import {
-  P_KeyStaysInWorld, P_WeaponAmmoClips, P_WeaponStaysInWorld,
+  P_KeyStaysInWorld, P_PickupSoundIsLocal,
+  P_WeaponAmmoClips, P_WeaponStaysInWorld,
 } from './p_pickup_logic.js';
 import { P_DropWeaponOnDeath } from './p_death_logic.js';
 
@@ -248,7 +249,12 @@ export function P_TouchSpecialThing(special, toucher) {
     default: return; // unknown special — leave it in place
   }
   if ((special.flags & 0x800000 /*MF_COUNTITEM*/) !== 0) player.itemcount++;
-  if (_S !== null) _S.S_StartSound(null /*player.mo would 3D-pan*/, sound);
+  // p_inter.c:655-660 — pickup feedback is local to the console player. A
+  // remote demo/net player still receives the item and bonus flash, but must
+  // not emit the sound through this client's mixer.
+  if (_S !== null && P_PickupSoundIsLocal(player, _players, consoleplayer)) {
+    _S.S_StartSound(null /*player.mo would 3D-pan*/, sound);
+  }
   player.bonuscount += 6;
   if (_PM !== null) _PM.P_RemoveMobj(special);
 }

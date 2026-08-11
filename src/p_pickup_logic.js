@@ -15,3 +15,7 @@ export function P_WeaponAmmoClips(netgame, deathmatch, dropped) {
 export function P_KeyStaysInWorld(netgame) {
   return netgame === true;
 }
+
+export function P_PickupSoundIsLocal(player, players, consoleplayer) {
+  return player === players[consoleplayer];
+}
