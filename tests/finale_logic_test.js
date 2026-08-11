@@ -1,7 +1,7 @@
 import { GameMode_t } from '../src/doomdef.js';
 import { C1TEXT, C4TEXT, C5TEXT, C6TEXT, E1TEXT, E4TEXT } from '../src/d_englsh.js';
 import {
-  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
+  F_GetBunnyScroll, F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
   F_ShouldStartCommercialFinale, F_UpdateBunnyStage,
 } from '../src/f_finale_logic.js';
 
@@ -87,4 +87,16 @@ Deno.test('E3 bunny END stages fire one pistol sound per newly shown frame', () 
   assertEquals(update.playPistol, true, 'first END6 sound');
   update = F_UpdateBunnyStage(10000, update.laststage);
   assertEquals(update.playPistol, false, 'held END6 stays silent');
+});
+
+Deno.test('E3 bunny scroll truncates the half-speed offset before subtraction', () => {
+  assertEquals(F_GetBunnyScroll(229), 320, 'negative half-tic clamp');
+  assertEquals(F_GetBunnyScroll(230), 320, 'scroll start');
+  assertEquals(F_GetBunnyScroll(231), 320, 'first odd tic');
+  assertEquals(F_GetBunnyScroll(232), 319, 'first complete two-tic step');
+  assertEquals(F_GetBunnyScroll(233), 319, 'second odd tic');
+  assertEquals(F_GetBunnyScroll(868), 1, 'last visible step');
+  assertEquals(F_GetBunnyScroll(869), 1, 'last odd tic');
+  assertEquals(F_GetBunnyScroll(870), 0, 'scroll end');
+  assertEquals(F_GetBunnyScroll(9999), 0, 'post-scroll clamp');
 });

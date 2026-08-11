@@ -19,7 +19,7 @@ import { W_CacheLumpNum, W_CheckNumForName, lumpinfo } from './w_wad.js';
 import { firstspritelump } from './r_data.js';
 import { sprites } from './r_things.js';
 import {
-  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
+  F_GetBunnyScroll, F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
   F_UpdateBunnyStage,
 } from './f_finale_logic.js';
 import {
@@ -166,9 +166,7 @@ function F_BunnyScroll(ctx, dx, dy, dw, dh) {
   const sx = dw / 320, sy = dh / 200;
   const p1 = getPatch('PFUB2'); // left image (drawn first)
   const p2 = getPatch('PFUB1'); // right image
-  let scrolled = 320 - ((_finalecount - 230) / 2) | 0;
-  if (scrolled > 320) scrolled = 320;
-  if (scrolled < 0)   scrolled = 0;
+  const scrolled = F_GetBunnyScroll(_finalecount);
   // Composite: 320-pixel-wide viewport sourced from p1 (cols 0..320-scrolled-1)
   // followed by p2 (cols 0..scrolled-1). Pillarbox black if absent.
   ctx.fillStyle = V_PaletteCSS(0);

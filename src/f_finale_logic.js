@@ -58,6 +58,14 @@ export function F_ShouldAdvanceCommercial(finaleCount, buttons) {
   return finaleCount > 50 && buttons.some((value) => value !== 0);
 }
 
+// f_finale.c:F_BunnyScroll uses C integer division before subtracting the
+// half-speed offset from 320. Truncating the final subtraction instead moves
+// the panorama one pixel early on every odd tic.
+export function F_GetBunnyScroll(finalecount) {
+  const offset = Math.trunc((finalecount - 230) / 2);
+  return Math.max(0, Math.min(320, 320 - offset));
+}
+
 // f_finale.c:F_BunnyScroll — END0 is held silently, then END1..END6 advance
 // every five tics. The static laststage makes each newly displayed stage fire
 // exactly one pistol sound even when the drawer runs more than once per tic.
