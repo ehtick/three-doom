@@ -40,7 +40,7 @@ import * as _PMobj from './p_mobj.js';
 import * as _PTick from './p_tick.js';
 import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
-import { D_AccumulateTics } from './d_timing.js';
+import { D_AdvanceSimulationClock } from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_PausePatchPosition, D_ShouldStartWipe } from './d_display_logic.js';
 import { R_CalculateCanvasView, R_GetViewSize } from './r_view.js';
@@ -499,7 +499,13 @@ async function D_DoomLoop() {
     if (_lastTime === 0) _lastTime = now;
     const dt = (now - _lastTime) / 1000;
     _lastTime = now;
-    const clock = D_AccumulateTics(_ticAccum, dt);
+    // d_main.c:331-344 performs the complete wipe inside D_Display, before its
+    // outer loop can reach M_Ticker/G_Ticker again.  Our melt spans RAFs, so
+    // freeze the whole tic pipeline while it is active.  _lastTime still moves
+    // forward and the helper retains only the sub-tic wall-clock phase, rather
+    // than replaying whole wipe tics as a post-wipe catch-up burst.
+    const wipeActive = _fwipeActive !== null && _fwipeActive() === true;
+    const clock = D_AdvanceSimulationClock(_ticAccum, dt, wipeActive);
     _ticAccum = clock.remainder;
     let dueTics = clock.due;
     while (dueTics-- > 0) {

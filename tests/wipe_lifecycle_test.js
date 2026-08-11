@@ -44,6 +44,33 @@ Deno.test('D_Display captures, composes, starts, and steps wipes in reference or
   }
 });
 
+Deno.test('active wipes gate the complete simulation tic pipeline', () => {
+  const loopStart = mainSource.indexOf('async function D_DoomLoop()');
+  const loop = mainSource.slice(loopStart);
+  const wipeGate = loop.indexOf('const wipeActive = _fwipeActive !== null && _fwipeActive() === true');
+  const clock = loop.indexOf('D_AdvanceSimulationClock(_ticAccum, dt, wipeActive)', wipeGate);
+  const ticLoop = loop.indexOf('while (dueTics-- > 0)', clock);
+  const display = loop.indexOf('D_Display()', ticLoop);
+  if (wipeGate < 0 || clock <= wipeGate || ticLoop <= clock || display <= ticLoop) {
+    throw new Error('wipe gate is not ahead of the complete tic loop');
+  }
+  for (const ticker of [
+    'D_KeyboardInput.buildCmd',
+    '_menuTicker()',
+    '_gTicker()',
+    '_pTicker()',
+    '_wiTicker()',
+    '_fTicker()',
+    'D_PageTicker()',
+    'set_gametic(doomstat.gametic + 1)',
+  ]) {
+    const position = loop.indexOf(ticker, ticLoop);
+    if (position <= ticLoop || position >= display) {
+      throw new Error(`${ticker} escaped the wipe-gated tic loop`);
+    }
+  }
+});
+
 Deno.test('wipe snapshots compose WebGL below the Canvas overlay', () => {
   const capture = wipeSource.slice(
     wipeSource.indexOf('function _captureComposedFrame'),

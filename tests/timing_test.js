@@ -1,4 +1,4 @@
-import { D_AccumulateTics } from '../src/d_timing.js';
+import { D_AccumulateTics, D_AdvanceSimulationClock } from '../src/d_timing.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -25,5 +25,19 @@ Deno.test('fractional tic time carries across render frames', () => {
   assertEquals(clock.due, 1, 'second 60 Hz frame');
   if (!(clock.remainder > 0 && clock.remainder < 1)) {
     throw new Error(`remainder must stay fractional, got ${clock.remainder}`);
+  }
+});
+
+Deno.test('wipe frames discard whole tics but retain wall-clock phase', () => {
+  const frozen = D_AdvanceSimulationClock(0.75, 0.02, true);
+  assertEquals(frozen.due, 0, 'wipe frame due tics');
+  if (Math.abs(frozen.remainder - 0.45) > Number.EPSILON * 4) {
+    throw new Error(`wipe frame phase: expected 0.45, got ${frozen.remainder}`);
+  }
+
+  const resumed = D_AdvanceSimulationClock(frozen.remainder, 0.55 / 35, false);
+  assertEquals(resumed.due, 1, 'remaining phase completes one resumed tic');
+  if (Math.abs(resumed.remainder) > Number.EPSILON * 4) {
+    throw new Error(`resumed phase: expected 0, got ${resumed.remainder}`);
   }
 });
