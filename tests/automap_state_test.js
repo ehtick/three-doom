@@ -6,6 +6,7 @@ import {
   AM_Start, AM_Stop,
   automapactive as automapModuleActive,
 } from '../src/am_map.js';
+import * as doomstat from '../src/doomstat.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -29,4 +30,18 @@ Deno.test('automap and game transitions share one live active-state binding', ()
   AM_Start();
   AM_Stop();
   assertEquals(doomstatAutomapActive, false, 'AM_Stop publishes to doomstat');
+});
+
+Deno.test('completion clears automap before victory and brackets view state', async () => {
+  const source = await Deno.readTextFile(new URL('../src/g_game.js', import.meta.url));
+  const completed = source.slice(source.indexOf('export function G_DoCompleted'), source.indexOf('export function G_DoVictory'));
+  const worldDone = source.slice(source.indexOf('export function G_DoWorldDone'), source.indexOf('// g_game.c:897'));
+  const clearAutomap = completed.indexOf('doomstat.set_automapactive(false)');
+  const victory = completed.indexOf('gamemap === 8');
+  if (clearAutomap < 0 || victory <= clearAutomap ||
+      !completed.includes('doomstat.set_viewactive(false)') ||
+      !completed.includes('doomstat.set_automapactive(false)') ||
+      !worldDone.includes('doomstat.set_viewactive(true)')) {
+    throw new Error('transition view/automap state does not match G_DoCompleted/G_DoWorldDone');
+  }
 });

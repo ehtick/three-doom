@@ -332,6 +332,7 @@ export function G_InitNew(skill, episode, map) {
   doomstat.set_paused(false);
   doomstat.set_demoplayback(false);
   doomstat.set_automapactive(false);
+  doomstat.set_viewactive(true);
 
   set_gameskill(skill);
   set_gameepisode(episode);
@@ -510,6 +511,10 @@ export function G_DoCompleted() {
       G_PlayerFinishLevel(players[i]);
     }
   }
+  // g_game.c:1026-1027 — stop the automap before either the episode-victory
+  // early return or the intermission path. Otherwise its active flag survives
+  // into the next map.
+  doomstat.set_automapactive(false);
 
   // ExM8 (Doom 1 episode boss) → finale instead of intermission.
   if (gamemode !== GameMode_t.commercial && gamemap === 8) {
@@ -588,6 +593,8 @@ export function G_DoCompleted() {
     pnum:      consoleplayer,
   };
   set_gamestate(gamestate_t.GS_INTERMISSION);
+  doomstat.set_viewactive(false);
+  doomstat.set_automapactive(false);
   // Tell G_DoWorldDone where to go on press-key.
   set_wmNext(nextMap);
   WI_Start(wbs, () => {
@@ -626,6 +633,7 @@ export function G_DoWorldDone() {
   // g_game.c:G_DoWorldDone calls G_DoLoadLevel directly.
   G_DoLoadLevel();
   set_gameaction(gameaction_t.ga_nothing);
+  doomstat.set_viewactive(true);
 }
 // g_game.c:897 — random DM spawn (vanilla uses P_Random).
 export function G_DeathMatchSpawnPlayer(playernum) {
