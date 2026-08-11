@@ -9,6 +9,7 @@ import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT, evtype_t } from './d_
 import { KEY_EQUALS } from './doomdef.js';
 import { AM_Responder } from './am_map.js';
 import { cht_HandleKey } from './m_cheat.js';
+import { G_NextDisplayPlayer, G_ShouldCycleDisplayPlayer } from './g_spy_logic.js';
 import {
   D_ComputeMovement,
   D_MouseStrafePressed,
@@ -75,6 +76,24 @@ async function onKeyDown(e) {
         ? _mMenu.M_Responder({ type: evtype_t.ev_keydown, data1: doomKey, data2: 0, data3: 0 }) === true
         : doomstat.menuactive === true);
       if (D_ShouldCaptureGameplayPress(menuConsumed) !== true) {
+        e.preventDefault?.();
+        return;
+      }
+      // The event-ring G_Responder is represented directly by these browser
+      // handlers. Preserve its F12 spy branch before attract/demo interception
+      // and before the key can enter gamekeydown.
+      if (G_ShouldCycleDisplayPlayer(
+        doomstat.gamestate,
+        evtype_t.ev_keydown,
+        doomKey,
+        doomstat.singledemo,
+        doomstat.deathmatch,
+      )) {
+        doomstat.set_displayplayer(G_NextDisplayPlayer(
+          doomstat.displayplayer,
+          doomstat.consoleplayer,
+          doomstat.playeringame,
+        ));
         e.preventDefault?.();
         return;
       }

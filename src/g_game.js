@@ -31,6 +31,7 @@ import {
   G_DeathMatchSpawnPlayer as G_RunDeathMatchSpawnPlayer,
   G_DoReborn as G_RunDoReborn,
 } from './g_multiplayer.js';
+import { G_NextDisplayPlayer, G_ShouldCycleDisplayPlayer } from './g_spy_logic.js';
 
 let _deferred = null; // pending gameaction params
 
@@ -82,6 +83,24 @@ export function G_Responder(ev) {
   // Menu first — both vanilla M_Responder and ours own the Esc / arrow / yn
   // dispatch from outside the level too.
   if (_M_Responder(ev) === true) return true;
+
+  // g_game.c:506-519 — after the outer menu responder, F12 cycles the
+  // rendered player before attract/demo interception and the level responders.
+  // Deathmatch disables normal spying, but single-demo playback is allowed.
+  if (G_ShouldCycleDisplayPlayer(
+    gamestate,
+    ev.type,
+    ev.data1,
+    doomstat.singledemo,
+    doomstat.deathmatch,
+  )) {
+    doomstat.set_displayplayer(G_NextDisplayPlayer(
+      doomstat.displayplayer,
+      consoleplayer,
+      playeringame,
+    ));
+    return true;
+  }
 
   if (gamestate === gamestate_t.GS_LEVEL) {
     if (_HU_Responder !== null && _HU_Responder(ev) === true) return true;
@@ -261,6 +280,8 @@ export function G_DoLoadLevel() {
   // the rest of its browser-local command state after level setup.
   doomstat.set_paused(false);
   if (_loadLevel !== null) _loadLevel(gameepisode, gamemap, gameskill);
+  // g_game.c:485 — spying never carries across a level load.
+  doomstat.set_displayplayer(consoleplayer);
 }
 
 export function G_DeferedInitNew(skill, episode, map) {

@@ -202,7 +202,10 @@ function D_Display() {
     I_ClearFrame();
     I_FinishUpdate(); // paints TITLEPIC to the same overlay canvas
   } else if (gamestate === gamestate_t.GS_LEVEL) {
-    const p = players[consoleplayer];
+    // d_main.c renders the spied player and that player's weapon psprites.
+    // Status/HU/automap and positional sound remain bound to consoleplayer in
+    // their own modules, exactly as the original globals do.
+    const p = players[doomstat.displayplayer];
     // d_main.c calls R_RenderPlayerView only while viewactive; reference
     // AM_Start clears that flag. Mirror the same gate from our authoritative
     // automap binding so no first-person setup reveals the current subsector,
