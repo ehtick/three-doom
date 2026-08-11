@@ -22,4 +22,4 @@ Code: GPL v2
 ### Credits
 
 - Original game by id Software ([source](https://github.com/id-Software/DOOM))
-- Three.js port by [@mrdoob](https://github.com/mrdoob), [@claude](https://github.com/claude), and [Codex](https://github.com/openai/codex)
+- Three.js port by [@mrdoob](https://github.com/mrdoob) with [@claude](https://github.com/claude) and [codex](https://github.com/openai/codex)
