@@ -6,7 +6,7 @@
 
 import { renderer } from './i_video.js';
 import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT } from './d_event.js';
-import { D_ComputeMovement } from './d_input_logic.js';
+import { D_ComputeMovement, D_MouseStrafePressed } from './d_input_logic.js';
 
 // Cache cross-module references at module load — keystrokes are a hot path
 // and `await import()` per event adds microtask latency. The dynamic-import
@@ -213,7 +213,8 @@ export const D_KeyboardInput = {
     const turning = keys.has('ArrowLeft') || keys.has('ArrowRight');
     if (turning === true) turnheld++;
     else                  turnheld = 0;
-    const strafe = keys.has('AltLeft') || keys.has('AltRight') || (mouseButtons & 2) !== 0;
+    const mouseStrafe = D_MouseStrafePressed(mouseButtons);
+    const strafe = keys.has('AltLeft') || keys.has('AltRight') || mouseStrafe;
     const movement = D_ComputeMovement({
       fast,
       forward: keys.has('KeyW') || keys.has('ArrowUp'),
@@ -261,10 +262,10 @@ export const D_KeyboardInput = {
       dclicktime++;
       if (dclicktime > 20) { dclicks = 0; dclickstate = 0; }
     }
-    // Alt/middle-mouse strafe double-click uses the same BT_USE shortcut as
-    // the original second dclick state machine.
-    if (strafe !== (dclickstate2 !== 0) && dclicktime2 > 1) {
-      dclickstate2 = strafe ? 1 : 0;
+    // Middle-mouse strafe double-click uses the original second BT_USE state
+    // machine. Keyboard Alt changes movement mode but contributes no click.
+    if (mouseStrafe !== (dclickstate2 !== 0) && dclicktime2 > 1) {
+      dclickstate2 = mouseStrafe ? 1 : 0;
       if (dclickstate2 === 1) dclicks2++;
       if (dclicks2 === 2) { cmd.buttons |= 2 /*BT_USE*/; dclicks2 = 0; }
       else dclicktime2 = 0;

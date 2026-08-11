@@ -1,4 +1,4 @@
-import { D_ComputeMovement } from '../src/d_input_logic.js';
+import { D_ComputeMovement, D_MouseStrafePressed } from '../src/d_input_logic.js';
 
 function assertMovement(input, turnheld, expected, message) {
   const actual = D_ComputeMovement(input, turnheld);
@@ -60,4 +60,14 @@ Deno.test('angleturn wraps across both signed-short boundaries', () => {
     { forwardmove: 0, sidemove: 0, angleturn: -32760 },
     'positive overflow',
   );
+});
+
+Deno.test('strafe double-click edges come only from the middle mouse button', () => {
+  if (D_MouseStrafePressed(0) !== false ||
+      D_MouseStrafePressed(1) !== false ||
+      D_MouseStrafePressed(2) !== true ||
+      D_MouseStrafePressed(4) !== false ||
+      D_MouseStrafePressed(7) !== true) {
+    throw new Error('mousebstrafe bit decoding does not match vanilla');
+  }
 });

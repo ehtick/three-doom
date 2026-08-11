@@ -18,6 +18,13 @@ function narrowAngle(value) {
   return (value << 16) >> 16;
 }
 
+// g_game.c's bstrafe double-click detector reads only mousebstrafe (middle
+// mouse by default). The keyboard Alt strafe modifier affects movement but is
+// deliberately not part of this mouse-button edge detector.
+export function D_MouseStrafePressed(mouseButtons) {
+  return (mouseButtons & 2) !== 0;
+}
+
 export function D_ComputeMovement(input, turnheld) {
   const fast = input.fast === true;
   const forwardStep = fast ? 50 : 25;
