@@ -20,7 +20,11 @@ import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
 // close, oof on an invalid action.
-import { S_StartSound } from './s_sound.js';
+import {
+  S_SetMusicVolume as S_ApplyMusicVolume,
+  S_SetSfxVolume as S_ApplySfxVolume,
+  S_StartSound,
+} from './s_sound.js';
 import { sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sounds.js';
 import { HU_ToggleMessages, showMessages } from './hu_stuff.js';
 import { D_AcquirePointerLock } from './d_keyboard.js';
@@ -149,9 +153,9 @@ OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
 // m_menu.c:422-447 — SoundMenu also has spacer rows (sfx_empty1/2) holding the
 // volume thermos (one line below each label).
 const SOUND_MENU = { name: 'Sound', x: 80, y: 64, items: [
-  { patch: 'M_SFXVOL', label: 'Sfx Volume',   slider: true, get: () => sfxVolume,   set: (v) => { sfxVolume   = Math.max(0, Math.min(15, v)); _notifyVolume(); } },
+  { patch: 'M_SFXVOL', label: 'Sfx Volume',   slider: true, get: () => sfxVolume,   set: (v) => M_SetSfxVolume(v) },
   { spacer: true },
-  { patch: 'M_MUSVOL', label: 'Music Volume', slider: true, get: () => musicVolume, set: (v) => { musicVolume = Math.max(0, Math.min(15, v)); _notifyVolume(); } },
+  { patch: 'M_MUSVOL', label: 'Music Volume', slider: true, get: () => musicVolume, set: (v) => M_SetMusicVolume(v) },
   { spacer: true },
 ]};
 // m_menu.c:800-809 M_DrawSound — title + sfx/music thermos (width 16).
@@ -179,12 +183,19 @@ const READ_MENU_2 = { name: 'Read This 2', x: 330, y: 175, fullscreen: 'HELP2', 
   { patch: '', label: '', action: () => popMenu() },
 ]};
 
-// ---------- Volume change side-effect wiring ----------
-let _onVolumeChanged = null;
-export function M_SetExternals(refs) {
-  if (refs.onVolumeChanged != null) _onVolumeChanged = refs.onVolumeChanged;
+// m_menu.c:M_SfxVol/M_MusicVol apply each slider step immediately through the
+// sound module. Keeping these setters exported also gives config/UI code one
+// path that cannot leave the displayed and effective volumes out of sync.
+export function M_SetSfxVolume(value) {
+  sfxVolume = Math.max(0, Math.min(15, value | 0));
+  S_ApplySfxVolume(sfxVolume);
+  return sfxVolume;
 }
-function _notifyVolume() { if (_onVolumeChanged) _onVolumeChanged(sfxVolume, musicVolume); }
+export function M_SetMusicVolume(value) {
+  musicVolume = Math.max(0, Math.min(15, value | 0));
+  S_ApplyMusicVolume(musicVolume);
+  return musicVolume;
+}
 
 // ---------- Modal message prompt ----------
 let _message = null;    // { text, routine, input, lastMenuActive }
