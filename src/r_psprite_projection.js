@@ -1,7 +1,8 @@
 // Pure player-sprite projection and Canvas drawing helpers. These mirror the
 // fixed-point bounds and flip branch in r_things.c:R_DrawPSprite.
 
-import { FRACUNIT } from './m_fixed.js';
+import { FixedMul, FRACUNIT } from './m_fixed.js';
+import { SCREENWIDTH } from './doomdef.js';
 
 function fixedFloor(value) {
   return Math.floor(value / FRACUNIT);
@@ -28,6 +29,42 @@ export function R_PspritePatchBounds(pspSx, pspSy, patch) {
   };
 }
 
+// r_things.c:R_DrawPSprite after R_ExecuteSetViewSize has selected a reduced
+// view. Coordinates are local to the view window; the caller adds
+// viewwindowx/viewwindowy when composing into the 320x200 logical screen.
+export function R_ProjectPspritePatch(pspSx, pspSy, patch, viewwidth, viewheight) {
+  const scale = Math.trunc(FRACUNIT * viewwidth / SCREENWIDTH);
+  const centerxfrac = Math.trunc(viewwidth / 2) * FRACUNIT;
+  const centeryfrac = Math.trunc(viewheight / 2) * FRACUNIT;
+  let tx = pspSx - 160 * FRACUNIT - patch.leftoffset * FRACUNIT;
+  const left = Math.floor((centerxfrac + FixedMul(tx, scale)) / FRACUNIT);
+  tx += patch.w * FRACUNIT;
+  const right = Math.floor((centerxfrac + FixedMul(tx, scale)) / FRACUNIT);
+
+  const texturemid = 100 * FRACUNIT + FRACUNIT / 2 -
+    (pspSy - patch.topoffset * FRACUNIT);
+  const topfixed = centeryfrac - FixedMul(texturemid, scale);
+  const bottomfixed = topfixed + scale * patch.h;
+  const top = fixedCeil(topfixed);
+  const bottom = fixedCeil(bottomfixed);
+
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+    sourceWidth: patch.w,
+    sourceHeight: patch.h,
+    clipLeft: Math.max(0, left),
+    clipTop: Math.max(0, top),
+    clipRight: Math.min(viewwidth, right),
+    clipBottom: Math.min(viewheight, bottom),
+    scale,
+  };
+}
+
 // A flipped sprite keeps the exact same projected rectangle. Vanilla starts
 // at spritewidth-1 with a negative xiscale; Canvas expresses that by moving
 // the origin to the rectangle's right edge and reversing the local X axis.
@@ -36,8 +73,10 @@ export function R_DrawPspritePatch(ctx, canvas, bounds, dstX, dstY, scaleX, scal
   const y = dstY + bounds.top * scaleY;
   const width = bounds.width * scaleX;
   const height = bounds.height * scaleY;
+  const sourceWidth = bounds.sourceWidth ?? bounds.width;
+  const sourceHeight = bounds.sourceHeight ?? bounds.height;
   if (flipped !== true) {
-    ctx.drawImage(canvas, 0, 0, bounds.width, bounds.height, x, y, width, height);
+    ctx.drawImage(canvas, 0, 0, sourceWidth, sourceHeight, x, y, width, height);
     return;
   }
 
@@ -45,7 +84,7 @@ export function R_DrawPspritePatch(ctx, canvas, bounds, dstX, dstY, scaleX, scal
   try {
     ctx.translate(x + width, y);
     ctx.scale(-1, 1);
-    ctx.drawImage(canvas, 0, 0, bounds.width, bounds.height, 0, 0, width, height);
+    ctx.drawImage(canvas, 0, 0, sourceWidth, sourceHeight, 0, 0, width, height);
   } finally {
     ctx.restore();
   }

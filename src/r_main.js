@@ -4,7 +4,7 @@
 // to match the player and asks Three.js to render.
 
 import * as THREE from 'three';
-import { camera, scene, renderer } from './i_video.js';
+import { camera, scene, I_RenderView } from './i_video.js';
 import { players, consoleplayer, viewangleoffset } from './doomstat.js';
 import { ANG90 } from './tables.js';
 import { R_BuildWalls, R_ShutdownWalls } from './r_segs.js';
@@ -16,6 +16,7 @@ import { R_PointInSubsector } from './r_bsp.js';
 import { R_SetViewLighting } from './r_shader.js';
 import { segs } from './p_setup.js';
 import { ML_MAPPED } from './doomdata.js';
+import { R_GetViewSize } from './r_view.js';
 
 let _levelRoot = null;
 
@@ -86,7 +87,11 @@ function bamToRad(bam) {
 export function R_SetupFrame(player) {
   if (player === null || player.mo === null) return;
   const mo = player.mo;
-  R_SetViewLighting(player.extralight, player.fixedcolormap);
+  R_SetViewLighting(
+    player.extralight,
+    player.fixedcolormap,
+    R_GetViewSize().scaledviewwidth,
+  );
   // Update view origin (used by sprite rotation pick in r_things.js).
   set_thing_view(mo.x, mo.y);
   // Doom -> Three.js: (mo.x, viewz, -mo.y). player.viewz is absolute world z.
@@ -125,7 +130,7 @@ export function R_SetupFrame(player) {
 export function R_RenderPlayerView(player) {
   R_SetupFrame(player);
   R_UpdateSky();
-  renderer.render(scene, camera);
+  I_RenderView(scene, camera);
 }
 
 export function R_Init() {

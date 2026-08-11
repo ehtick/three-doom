@@ -20,6 +20,7 @@ import {
 import { R_SetPaletteIndex, R_SetPlaypal, R_ShutdownShader } from './r_shader.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_ShouldInterceptDemoInput } from './d_input_logic.js';
+import { R_CalculateCanvasView, R_DoomVerticalFov, R_GetViewSize } from './r_view.js';
 
 // ---------- Three.js setup ----------
 export let renderer = null;
@@ -29,10 +30,14 @@ export let camera   = null;
 // Vanilla sets `projection = centerx`, so the left and right view rays are
 // always 45 degrees from the optical axis: a 90-degree horizontal FOV.
 // THREE.PerspectiveCamera.fov is vertical, so derive it from the live aspect.
-const DOOM_HORIZONTAL_FOV = 90;
-function doomVerticalFov(aspect) {
-  const halfHorizontal = THREE.MathUtils.degToRad(DOOM_HORIZONTAL_FOV * 0.5);
-  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(halfHorizontal) / aspect));
+function configureViewCamera(targetCamera, view = R_GetViewSize()) {
+  if (targetCamera === null) return;
+  const aspect = view.scaledviewwidth / view.viewheight;
+  const fov = R_DoomVerticalFov(aspect);
+  if (targetCamera.aspect === aspect && targetCamera.fov === fov) return;
+  targetCamera.aspect = aspect;
+  targetCamera.fov = fov;
+  targetCamera.updateProjectionMatrix();
 }
 
 // 2D overlay
@@ -133,7 +138,7 @@ export function I_InitGraphics() {
 
   scene = new THREE.Scene();
   const aspect = window.innerWidth / window.innerHeight;
-  camera = new THREE.PerspectiveCamera(doomVerticalFov(aspect), aspect, 1, 16384);
+  camera = new THREE.PerspectiveCamera(R_DoomVerticalFov(aspect), aspect, 1, 16384);
 
   // 2D overlay
   overlayCanvas = document.getElementById('overlay');
@@ -192,7 +197,8 @@ export function I_InitGraphics() {
 function captureScreenshot() {
   if (renderer === null || overlayCanvas === null) return;
   // Re-render so preserveDrawingBuffer isn't required.
-  renderer.render(scene, camera);
+  if (_doomstat?.gamestate === 0 /*GS_LEVEL*/) I_RenderView(scene, camera);
+  else I_ClearFrame();
   const w = renderer.domElement.width;
   const h = renderer.domElement.height;
   const out = document.createElement('canvas');
@@ -262,7 +268,7 @@ export function I_ShutdownGraphics() {
     let disposedLevelObjects = 0;
     let contextLost = ownedRenderer === null;
     try {
-      const [dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, fWipe, vVideo, hu, wi, finale] = await Promise.all([
+      const [dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, rBorder, fWipe, vVideo, hu, wi, finale] = await Promise.all([
         import('./d_main.js'),
         import('./d_keyboard.js'),
         import('./d_freecamera.js'),
@@ -270,6 +276,7 @@ export function I_ShutdownGraphics() {
         import('./r_data.js'),
         import('./r_things.js'),
         import('./r_psprite.js'),
+        import('./r_border.js'),
         import('./f_wipe.js'),
         import('./v_video.js'),
         import('./hu_stuff.js'),
@@ -283,6 +290,7 @@ export function I_ShutdownGraphics() {
         () => { disposedLevelObjects = rMain.R_Shutdown(); },
         () => rThings.R_ShutdownThings(),
         () => rPsprite.R_ShutdownPlayerSprites(),
+        () => rBorder.R_ShutdownViewBorder(),
         () => fWipe.wipe_Shutdown(),
         () => hu.HU_Shutdown(),
         () => wi.WI_Shutdown(),
@@ -349,11 +357,7 @@ function resize() {
   overlayCanvas.width  = w;
   overlayCanvas.height = h;
   if (renderer) { renderer.setSize(w, h); }
-  if (camera) {
-    camera.aspect = w / h;
-    camera.fov = doomVerticalFov(camera.aspect);
-    camera.updateProjectionMatrix();
-  }
+  configureViewCamera(camera);
 }
 
 // ---------- Palette ----------
@@ -385,6 +389,47 @@ export function I_SetPaletteIndex(n) {
 
 // I_UpdateNoBlit: no-op (the C code used it for dirty-rect tracking only).
 export function I_UpdateNoBlit() {}
+
+export function I_GetCanvasView() {
+  if (overlayCanvas === null) return null;
+  return R_CalculateCanvasView(overlayCanvas.width, overlayCanvas.height);
+}
+
+// Non-level states are entirely composed by the paletted Canvas overlay.
+// Clear the WebGL backing canvas without rendering a retained level scene;
+// otherwise its pixels show through the transparent letterbox around title,
+// credit, intermission, and screenshot frames.
+export function I_ClearFrame() {
+  if (renderer === null || overlayCanvas === null) return;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, overlayCanvas.width, overlayCanvas.height);
+  renderer.clear(true, true, true);
+}
+
+// Render the world only into the logical Doom view window. WebGL viewport Y
+// is bottom-origin, while every Canvas overlay coordinate is top-origin.
+// Clearing once with scissoring disabled prevents an old larger view from
+// surviving around a newly-shrunk one.
+export function I_RenderView(targetScene = scene, targetCamera = camera) {
+  if (renderer === null || targetScene === null || targetCamera === null || overlayCanvas === null) {
+    return null;
+  }
+  const view = R_GetViewSize();
+  const layout = R_CalculateCanvasView(overlayCanvas.width, overlayCanvas.height, view);
+  configureViewCamera(targetCamera, view);
+
+  I_ClearFrame();
+  renderer.setViewport(layout.viewX, layout.webglViewY, layout.viewWidth, layout.viewHeight);
+  renderer.setScissor(layout.viewX, layout.webglViewY, layout.viewWidth, layout.viewHeight);
+  renderer.setScissorTest(true);
+  try {
+    renderer.render(targetScene, targetCamera);
+  } finally {
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, layout.canvasWidth, layout.canvasHeight);
+  }
+  return layout;
+}
 
 // I_FinishUpdate: present the frame. Paint the paletted screen onto the 2D
 // overlay; Three.js renders the 3D world separately (called from R_RenderPlayerView).

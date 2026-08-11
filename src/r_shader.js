@@ -9,12 +9,14 @@
 // The 3D port keeps wall / flat / sprite textures as 8-bit palette indices
 // (R8) plus a 1-bit alpha mask (G8), and a fragment shader reproduces the
 // COLORMAP lookup. View-space depth gives the same projected wall scale and
-// plane z-distance indices that vanilla used to select its integer LUTs.
+// plane z-distance indices that vanilla used to select its integer LUTs. The
+// current scaledviewwidth is a shared uniform because scalelight (unlike
+// zlight) is rebuilt whenever the view-size slider changes.
 
 import * as THREE from 'three';
 import {
   LIGHTLEVELS, MAXLIGHTSCALE, MAXLIGHTZ, NUMCOLORMAPS, DISTMAP,
-  LIGHT_PROJECTION, WALL_SCALE_NUMERATOR,
+  LIGHT_PROJECTION, REFERENCE_SCREENWIDTH,
 } from './r_light_logic.js';
 
 // Singletons — built lazily from the WAD's PLAYPAL + COLORMAP lumps.
@@ -97,6 +99,7 @@ export function R_ShutdownShader() {
   _paletteIndex = 0;
   extralightUniform.value = 0;
   fixedColormapUniform.value = -1;
+  scaledViewWidthUniform.value = REFERENCE_SCREENWIDTH;
 }
 
 // Build the (R8 index, R8 alpha) data texture from a Uint8Array of palette
@@ -125,12 +128,18 @@ export function R_MakeIndexedTexture(indices, alphas, w, h) {
 // these once before rendering, just as vanilla sets its renderer globals.
 export const extralightUniform = { value: 0 };
 export const fixedColormapUniform = { value: -1 };
+export const scaledViewWidthUniform = { value: REFERENCE_SCREENWIDTH };
 
-export function R_SetViewLighting(extralight, fixedColormap) {
+export function R_SetViewLighting(
+  extralight,
+  fixedColormap,
+  scaledViewWidth = REFERENCE_SCREENWIDTH,
+) {
   extralightUniform.value = extralight;
   // player.fixedcolormap uses 0 as "disabled"; shader -1 selects normal
   // distance lighting, while positive values are literal COLORMAP rows.
   fixedColormapUniform.value = fixedColormap === 0 ? -1 : fixedColormap;
+  scaledViewWidthUniform.value = Math.max(1, scaledViewWidth | 0);
 }
 
 // Sector-light range: vanilla snaps the 0..255 sector.lightlevel to one of
@@ -154,8 +163,8 @@ void main() {
 // Fragment shader applies vanilla's two distinct integer light-table paths.
 // Walls and masked midtextures select scalelight[light][rw_scale >> 12];
 // planes select zlight[light][distance >> LIGHTZSHIFT].  With the port's
-// fixed 320-wide/90-degree reference projection these indices can be derived
-// exactly from perpendicular view depth.  Final colour is
+// current 90-degree projection these indices can be derived from
+// perpendicular view depth. Final colour is
 // paletteTex[colormapTex[texIdx, row]].
 //
 // `masked` materials enable the alpha-discard branch for grates / fences.
@@ -165,6 +174,7 @@ uniform sampler2D palette;
 uniform sampler2D colormap;
 uniform float extralight;
 uniform float fixedColormap;     // -1 = use shading, >=0 = force this row (invuln=32)
+uniform float scaledViewWidth;   // R_ExecuteSetViewSize's scaledviewwidth
 uniform bool masked;
 uniform bool planeLighting;
 
@@ -195,15 +205,17 @@ void main() {
       float zScale = floor(${LIGHT_PROJECTION}.0 / (zIndex + 1.0));
       row = clamp(startMap - floor(zScale / ${DISTMAP}.0), 0.0, ${NUMCOLORMAPS - 1}.0);
     } else {
-      // R_RenderSegLoop/R_RenderMaskedSegRange: rw_scale is
-      // (160/depth)*FRACUNIT, so rw_scale >> LIGHTSCALESHIFT is
-      // floor(2560/depth), clamped to MAXLIGHTSCALE-1.  The full-width
-      // scalelight table subtracts integer scaleIndex/DISTMAP.
+      // R_RenderSegLoop/R_RenderMaskedSegRange: projection is current
+      // viewwidth/2, and R_ExecuteSetViewSize rebuilds scalelight with the
+      // SCREENWIDTH/scaledviewwidth attenuation factor.
       float scaleIndex = min(
-        floor(${WALL_SCALE_NUMERATOR}.0 / max(vViewDepth, 0.0000152587890625)),
+        floor((scaledViewWidth * 8.0) / max(vViewDepth, 0.0000152587890625)),
         ${MAXLIGHTSCALE - 1}.0
       );
-      row = clamp(startMap - floor(scaleIndex / ${DISTMAP}.0), 0.0, ${NUMCOLORMAPS - 1}.0);
+      float attenuation = floor(
+        floor(scaleIndex * ${REFERENCE_SCREENWIDTH}.0 / scaledViewWidth) / ${DISTMAP}.0
+      );
+      row = clamp(startMap - attenuation, 0.0, ${NUMCOLORMAPS - 1}.0);
     }
   }
 
@@ -230,6 +242,7 @@ export function R_MakeDoomMaterial(map, { masked = false, plane = false, side = 
       colormap:      { value: _colormapTex },
       extralight:    extralightUniform,
       fixedColormap: fixedColormap >= 0 ? { value: fixedColormap } : fixedColormapUniform,
+      scaledViewWidth: scaledViewWidthUniform,
       masked:        { value: masked },
       planeLighting: { value: plane },
     },
@@ -271,10 +284,8 @@ void main() {
 
 // r_things.c:R_ProjectSprite chooses sprite colormaps in this order:
 // MF_SHADOW, fixedcolormap, FF_FULLBRIGHT, then sector/distance lighting.
-// The normal-light branch reconstructs vanilla's full-screen scalelight index:
-//   xscale = 160 / depth (16.16 fixed)
-//   index  = min(xscale >> 12, 47) = min(floor(2560 / depth), 47)
-//   row    = startmap - index / DISTMAP (integer division, DISTMAP=2)
+// The normal-light branch reconstructs the current projection scale index and
+// the width-specific scalelight entry built by R_ExecuteSetViewSize.
 const SPRITE_FRAG_SHADER = /* glsl */ `
 uniform sampler2D map;
 uniform sampler2D palette;
@@ -282,6 +293,7 @@ uniform sampler2D colormap;
 uniform float sectorLight;
 uniform float extralight;
 uniform float fixedColormap;
+uniform float scaledViewWidth;
 uniform bool fullbright;
 uniform bool shadow;
 uniform float playerTranslation;
@@ -311,8 +323,11 @@ void main() {
   } else {
     float lightIdx = clamp(sectorLight + extralight, 0.0, 15.0);
     float startMap = (15.0 - lightIdx) * 4.0;
-    float scaleIndex = min(floor(2560.0 / max(vViewDepth, 1.0)), 47.0);
-    row = clamp(startMap - floor(scaleIndex / 2.0), 0.0, 31.0);
+    float scaleIndex = min(floor((scaledViewWidth * 8.0) / max(vViewDepth, 1.0)), 47.0);
+    float attenuation = floor(
+      floor(scaleIndex * ${REFERENCE_SCREENWIDTH}.0 / scaledViewWidth) / ${DISTMAP}.0
+    );
+    row = clamp(startMap - attenuation, 0.0, 31.0);
   }
 
   float sourceIndex = floor(texel.r * 255.0 + 0.5);
@@ -344,6 +359,7 @@ export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowPalette
       sectorLight:   { value: 15 },
       extralight:    extralightUniform,
       fixedColormap: fixedColormapUniform,
+      scaledViewWidth: scaledViewWidthUniform,
       fullbright:    { value: false },
       shadow:        { value: false },
       playerTranslation: { value: 0 },

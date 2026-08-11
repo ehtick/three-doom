@@ -2,6 +2,7 @@
 
 import * as doomstat from './doomstat.js';
 import { M_RegisterDefault } from './m_misc.js';
+import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 import { set_usegamma, usegamma } from './v_video.js';
 
 let _registered = false;
@@ -25,4 +26,8 @@ export function M_RegisterDoomDefaults() {
     get: () => usegamma,
     set: (value) => set_usegamma(value | 0),
   }, 0);
+  M_RegisterDefault('screenblocks', {
+    get: () => R_GetScreenblocks(),
+    set: (value) => R_SetViewSize(value | 0),
+  }, 9);
 }

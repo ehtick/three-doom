@@ -21,7 +21,11 @@ import {
   SPRITE_SHADOW_FLICKER,
   SPRITE_SHADOW_OPACITY,
 } from './r_sprite_logic.js';
-import { R_DrawPspritePatch, R_PspritePatchBounds } from './r_psprite_projection.js';
+import {
+  R_DrawPspritePatch,
+  R_ProjectPspritePatch,
+  R_PspritePatchBounds,
+} from './r_psprite_projection.js';
 
 // Cache source indices and one remapped Canvas per COLORMAP row. Each Canvas
 // still resolves those remapped indices through the active PLAYPAL lazily.
@@ -88,9 +92,9 @@ export function R_CreatePspriteCanvasInfo(source, colormapRow, maps = colormaps)
 }
 
 // Draw the player's psprites onto the overlay canvas. Called from D_Display
-// after the 3D scene is painted. `overlayCtx` is the 2D context, `scale` is
-// the upscale factor from 320×200 to the overlay's pixel size.
-export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH) {
+// after the 3D scene is painted. dstX/Y/W/H describe the complete logical
+// 320x200 screen; an optional view applies native reduced-view projection.
+export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH, view = null) {
   if (player === null || player.mo === null) return;
   const sx = dstW / SCREENWIDTH;
   const sy = dstH / SCREENHEIGHT;
@@ -103,47 +107,79 @@ export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH) 
   const shadowOpacity = invisible
     ? SPRITE_SHADOW_OPACITY + (Math.random() - 0.5) * 2 * SPRITE_SHADOW_FLICKER
     : 1;
-  for (const psp of player.psprites) {
-    // Vanilla: `if (!psp->state) continue;` — state pointer NULL means inactive.
-    // The JS port uses index 0 (S_NULL) or -1 as the inactive marker.
-    if (psp.state === -1 || psp.state === 0 || psp.state == null) continue;
-    const st = states[psp.state];
-    if (st === undefined) continue;
-    const sd = sprites[st.sprite];
-    if (sd === undefined || sd.numframes === 0) continue;
-    const frame = st.frame & 0x7fff;
-    if (frame >= sd.numframes) continue;
-    const sf = sd.spriteframes[frame];
-    const lumpIdx = sf.lump[0];
-    if (lumpIdx < 0) continue;
-    const source = decodePatch(lumpIdx);
-    const colormapRow = R_PspriteColormapRow(
-      invisible,
-      player.fixedcolormap,
-      st.frame,
-      sectorLight,
-      player.extralight,
+  const reduced = view !== null && view !== undefined;
+  if (reduced) {
+    overlayCtx.save();
+    overlayCtx.beginPath();
+    overlayCtx.rect(
+      dstX + view.viewwindowx * sx,
+      dstY + view.viewwindowy * sy,
+      view.scaledviewwidth * sx,
+      view.viewheight * sy,
     );
-    const t = R_CreatePspriteCanvasInfo(source, colormapRow);
-    // R_DrawPSprite computes its patch bounds before inspecting flip. The
-    // flipped branch only reverses startfrac/xiscale, so both orientations
-    // retain the exact same spriteoffset/spritetopoffset rectangle.
-    const bounds = R_PspritePatchBounds(psp.sx, psp.sy, t);
-    const previousAlpha = overlayCtx.globalAlpha;
-    if (colormapRow === PSPRITE_SHADOW_ROW) overlayCtx.globalAlpha = shadowOpacity;
-    try {
-      R_DrawPspritePatch(
-        overlayCtx,
-        t.canvas,
-        bounds,
-        dstX,
-        dstY,
-        sx,
-        sy,
-        sf.flip[0] === 1,
+    overlayCtx.clip();
+  }
+  try {
+    for (const psp of player.psprites) {
+      // Vanilla: `if (!psp->state) continue;` — state pointer NULL means inactive.
+      // The JS port uses index 0 (S_NULL) or -1 as the inactive marker.
+      if (psp.state === -1 || psp.state === 0 || psp.state == null) continue;
+      const st = states[psp.state];
+      if (st === undefined) continue;
+      const sd = sprites[st.sprite];
+      if (sd === undefined || sd.numframes === 0) continue;
+      const frame = st.frame & 0x7fff;
+      if (frame >= sd.numframes) continue;
+      const sf = sd.spriteframes[frame];
+      const lumpIdx = sf.lump[0];
+      if (lumpIdx < 0) continue;
+      const source = decodePatch(lumpIdx);
+      const colormapRow = R_PspriteColormapRow(
+        invisible,
+        player.fixedcolormap,
+        st.frame,
+        sectorLight,
+        player.extralight,
+        reduced ? view.scaledviewwidth : SCREENWIDTH,
       );
-    } finally {
-      overlayCtx.globalAlpha = previousAlpha;
+      const t = R_CreatePspriteCanvasInfo(source, colormapRow);
+      // R_DrawPSprite computes its patch bounds before inspecting flip. The
+      // flipped branch only reverses startfrac/xiscale, so both orientations
+      // retain the exact same spriteoffset/spritetopoffset rectangle.
+      let bounds;
+      if (reduced) {
+        const projected = R_ProjectPspritePatch(psp.sx, psp.sy, t, view.viewwidth, view.viewheight);
+        if (projected.clipLeft >= projected.clipRight || projected.clipTop >= projected.clipBottom) continue;
+        const detailScale = 1 << view.detailshift;
+        bounds = {
+          ...projected,
+          left: view.viewwindowx + projected.left * detailScale,
+          right: view.viewwindowx + projected.right * detailScale,
+          top: view.viewwindowy + projected.top,
+          bottom: view.viewwindowy + projected.bottom,
+          width: projected.width * detailScale,
+        };
+      } else {
+        bounds = R_PspritePatchBounds(psp.sx, psp.sy, t);
+      }
+      const previousAlpha = overlayCtx.globalAlpha;
+      if (colormapRow === PSPRITE_SHADOW_ROW) overlayCtx.globalAlpha = shadowOpacity;
+      try {
+        R_DrawPspritePatch(
+          overlayCtx,
+          t.canvas,
+          bounds,
+          dstX,
+          dstY,
+          sx,
+          sy,
+          sf.flip[0] === 1,
+        );
+      } finally {
+        overlayCtx.globalAlpha = previousAlpha;
+      }
     }
+  } finally {
+    if (reduced) overlayCtx.restore();
   }
 }

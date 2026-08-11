@@ -43,6 +43,7 @@ import { I_SetPalette } from './i_video.js';
 import { W_CacheLumpName } from './w_wad.js';
 import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4 } from './d_englsh.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
+import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 const getPatch = V_DecodePatchToCanvas;
 const GAMMA_MESSAGES = [GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4];
 
@@ -67,21 +68,20 @@ let _skullFrame   = 0;
 let _skullTicker  = 0;
 
 let _detailLevel  = 0;  // 0=high, 1=low
-// _screenSize is the menu's view-size index (0..8 — slider position).
-// _screenblocks is the corresponding renderer "screen blocks" value (3..11)
-// the C code passes to R_SetViewSize. They move together: m_menu.c:1152 has
+// screenSize is the menu's view-size index (0..8 — slider position).
+// screenblocks is the corresponding renderer value (3..11) passed to
+// R_SetViewSize. They move together: m_menu.c:1152 has
 // `screenblocks-- ; screenSize--` and the inverse for grow.
 // m_misc.c:279 — vanilla default is screenblocks=9 (status bar visible,
 // view inset by one step inside a border). The matching slider position
 // is screenSize = screenblocks - 3 = 6 (m_menu.c:1854).
-let _screenSize   = 6;
-let _screenblocks = 9;
+function getScreenSize() { return R_GetScreenblocks() - 3; }
 
-export function getScreenblocks() { return _screenblocks; }
+export function getScreenblocks() { return R_GetScreenblocks(); }
 // st_stuff.c:1111 — automap always restores the status bar even when the
 // first-person view-size slider is at fullscreen (screenblocks == 11).
 export function isStatusBarVisible() {
-  return _screenblocks < 11 || automapactive === true;
+  return R_GetScreenblocks() < 11 || automapactive === true;
 }
 
 // Save-slot names.
@@ -134,7 +134,7 @@ const SKILL_MENU = { name: 'Skill', x: 48, y: 63, items: [
 const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
   { patch: 'M_MESSG',  label: 'Messages',          action: () => HU_ToggleMessages() },
   { patch: 'M_DETAIL', label: 'Graphic Detail',    action: () => { _detailLevel ^= 1; } },
-  { patch: 'M_SCRNSZ', label: 'Screen Size',       slider: true, get: () => _screenSize, set: (v) => M_SizeDisplay(v > _screenSize ? 1 : 0) },
+  { patch: 'M_SCRNSZ', label: 'Screen Size',       slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
   { spacer: true },
   { patch: 'M_MSENS',  label: 'Mouse Sensitivity', slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
   { spacer: true },
@@ -153,7 +153,7 @@ OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
   // msgNames[showMessages] (0=off,1=on) beside the Messages label.
   _drawPatchDoom(ctx, showMessages === true ? 'M_MSGON' : 'M_MSGOFF', x + 120, y + LH * opt_messages, lx, ly, sx, sy);
   M_DrawThermo(ctx, x, y + LH * (opt_mousesens + 1), 10, mouseSensitivity, lx, ly, sx, sy);
-  M_DrawThermo(ctx, x, y + LH * (opt_scrnsize  + 1),  9, _screenSize, lx, ly, sx, sy);
+  M_DrawThermo(ctx, x, y + LH * (opt_scrnsize  + 1),  9, getScreenSize(), lx, ly, sx, sy);
 };
 
 // m_menu.c:422-447 — SoundMenu also has spacer rows (sfx_empty1/2) holding the
@@ -586,18 +586,11 @@ function drawMessage(ctx, dstX, dstY, dstW, dstH) {
 // Once we reach the top, screenblocks=11 hides the bar in first-person view;
 // an active automap still forces it on in ST_Ticker/ST_Drawer.
 export function M_SizeDisplay(choice) {
+  let blocks = R_GetScreenblocks();
   if (choice === 0) {
-    if (_screenSize > 0) {
-      _screenSize--;
-      _screenblocks--;
-    }
+    if (blocks > 3) blocks--;
   } else if (choice === 1) {
-    if (_screenSize < 8) {
-      _screenSize++;
-      _screenblocks++;
-    }
+    if (blocks < 11) blocks++;
   }
-  // 3D port doesn't have R_SetViewSize — instead the renderer just stays
-  // full-window. The only observable effect is hiding/showing the status bar
-  // (handled by d_main checking isStatusBarVisible() before calling ST_Drawer).
+  R_SetViewSize(blocks);
 }

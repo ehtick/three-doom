@@ -2,7 +2,10 @@
 // DOOM main program (D_DoomMain) and game loop (D_DoomLoop).
 
 import { I_Init, I_GetTime, I_Error } from './i_system.js';
-import { I_InitGraphics, I_SetPalette, I_SetPaletteIndex, I_FinishUpdate, renderer, scene, camera } from './i_video.js';
+import {
+  I_InitGraphics, I_SetPalette, I_SetPaletteIndex, I_FinishUpdate,
+  I_ClearFrame, I_RenderView, renderer, scene, camera,
+} from './i_video.js';
 import {
   V_Init, V_DrawPatch, V_DecodePatchToCanvas, V_DrawPatchAtCanvas,
   screens, patch_t,
@@ -40,6 +43,8 @@ import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 import { D_AccumulateTics } from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_PausePatchPosition } from './d_display_logic.js';
+import { R_CalculateCanvasView, R_GetViewSize } from './r_view.js';
+import { R_DrawViewBorder } from './r_border.js';
 import {
   G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
   G_WriteDemoTiccmds,
@@ -185,7 +190,7 @@ function D_Display() {
 
   if (gamestate === gamestate_t.GS_DEMOSCREEN) {
     D_PageDrawer();
-    if (renderer !== null) renderer.render(scene, camera);
+    I_ClearFrame();
     I_FinishUpdate(); // paints TITLEPIC to the same overlay canvas
   } else if (gamestate === gamestate_t.GS_LEVEL) {
     const p = players[consoleplayer];
@@ -203,7 +208,7 @@ function D_Display() {
       if (_updateSprites !== null) _updateSprites();
       if (_updateSky !== null) _updateSky();
       if (renderer !== null) {
-        renderer.render(scene, camera);
+        I_RenderView(scene, camera);
       }
     }
     // Overlay: weapon view-sprite (HUD/status to come).
@@ -223,39 +228,33 @@ function D_Display() {
     }
     if (_drawPlayerSprites !== null && p !== undefined && p !== null) {
       const cw = overlay.width, ch = overlay.height;
-      const scale = Math.min(cw / 320, ch / 200);
-      const dw = 320 * scale, dh = 200 * scale;
-      const dx = (cw - dw) * 0.5;
-      const dy = (ch - dh) * 0.5;
+      const view = R_GetViewSize();
+      const layout = R_CalculateCanvasView(cw, ch, view);
+      const { screenX: dx, screenY: dy, screenWidth: dw, screenHeight: dh } = layout;
+      if (doomstat.automapactive !== true) {
+        R_DrawViewBorder(o, layout, view, doomstat.gamemode);
+      }
       // am_map.c uses the top 320x168 framebuffer; the status bar owns the
       // bottom 32 pixels of the centered/scaled logical 320x200 screen.
-      if (_amDrawer !== null) _amDrawer(o, dx, dy, dw, 168 * scale);
+      if (_amDrawer !== null) _amDrawer(o, dx, dy, dw, 168 * layout.scale);
       // d_main.c:D_Display only calls R_RenderPlayerView when the automap is
       // closed. R_DrawPlayerSprites lives inside that render path, so weapon
       // and muzzle-flash psprites must not be composited over the automap.
       if (doomstat.automapactive !== true) {
-        _drawPlayerSprites(o, p, dx, dy, dw, dh);
+        _drawPlayerSprites(o, p, dx, dy, dw, dh, view);
       }
       // Pickup / item messages + level title (drawn in the letterboxed 320x200 area
       // so positions match the C source's screen coords).
       if (_huDrawer !== null) _huDrawer(o, dx, dy, dw, dh);
-      // STBAR is anchored to the very bottom of the screen (not the letterboxed
-      // 320x200 viewport). ST_Drawer expects a 320x200-relative box and draws
-      // the bar at y=168..200 inside it; we pick a virtual box such that the
-      // bar lands flush at the bottom of the actual canvas.
       // The fullscreen first-person size hides STBAR, but vanilla forces it
       // back on whenever automapactive is true.
       if (_stDrawer !== null && (_isStatusBarVisible === null || _isStatusBarVisible() === true)) {
-        const cw = overlay.width;
-        const barScale = cw / 320;
-        const virtH = 200 * barScale;
-        const virtY = overlay.height - virtH;
-        _stDrawer(o, 0, virtY, cw, virtH);
+        _stDrawer(o, dx, dy, dw, dh);
       }
     }
   } else if (gamestate === gamestate_t.GS_INTERMISSION) {
     // Black background under the intermission widgets.
-    if (renderer !== null) renderer.render(scene, camera);
+    I_ClearFrame();
     const o = getOverlay();
     o.imageSmoothingEnabled = false;
     o.clearRect(0, 0, _overlayCanvas.width, _overlayCanvas.height);
@@ -268,7 +267,7 @@ function D_Display() {
       _wiDrawer(o, dx, dy, dw, dh);
     }
   } else if (gamestate === gamestate_t.GS_FINALE) {
-    if (renderer !== null) renderer.render(scene, camera);
+    I_ClearFrame();
     const o = getOverlay();
     const cw = _overlayCanvas.width, ch = _overlayCanvas.height;
     o.imageSmoothingEnabled = false;
@@ -280,7 +279,7 @@ function D_Display() {
       _fDrawer(o, (cw - dw) * 0.5, (ch - dh) * 0.5, dw, dh);
     }
   } else {
-    if (renderer !== null) renderer.render(scene, camera);
+    I_ClearFrame();
     I_FinishUpdate();
   }
 

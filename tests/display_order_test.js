@@ -12,7 +12,7 @@ Deno.test('automap suppresses the complete first-person setup and render path', 
   const freeCamera = display.indexOf('D_FreeCamera.update()', setup);
   const sprites = display.indexOf('_updateSprites()', freeCamera);
   const sky = display.indexOf('_updateSky()', sprites);
-  const render = display.indexOf('renderer.render(scene, camera)', sky);
+  const render = display.indexOf('I_RenderView(scene, camera)', sky);
   const overlay = display.indexOf('const o = getOverlay()', render);
   if (guard < 0 || setup <= guard || freeCamera <= setup || sprites <= freeCamera ||
       sky <= sprites || render <= sky || overlay <= render) {
@@ -25,7 +25,7 @@ Deno.test('fullscreen status-bar visibility is overridden by an active automap',
     menuSource.indexOf('export function isStatusBarVisible'),
     menuSource.indexOf('// ---------- Menu definitions'),
   );
-  if (!visibility.includes('_screenblocks < 11 || automapactive === true')) {
+  if (!visibility.includes('R_GetScreenblocks() < 11 || automapactive === true')) {
     throw new Error('screenblocks 11 still hides STBAR while automap is active');
   }
 });
@@ -34,12 +34,12 @@ Deno.test('automap suppresses psprites without suppressing HUD or status bar', (
   const displayStart = source.indexOf('function D_Display()');
   const displayEnd = source.indexOf('// D_DoomLoop:', displayStart);
   const display = source.slice(displayStart, displayEnd);
-  const automap = display.indexOf('_amDrawer(o, dx, dy, dw, 168 * scale)');
+  const automap = display.indexOf('_amDrawer(o, dx, dy, dw, 168 * layout.scale)');
   const guard = display.indexOf('if (doomstat.automapactive !== true)', automap);
-  const psprites = display.indexOf('_drawPlayerSprites(o, p, dx, dy, dw, dh)', guard);
+  const psprites = display.indexOf('_drawPlayerSprites(o, p, dx, dy, dw, dh, view)', guard);
   const guardEnd = display.indexOf('\n      }', psprites);
   const hud = display.indexOf('_huDrawer(o, dx, dy, dw, dh)', psprites);
-  const status = display.indexOf('_stDrawer(o, 0, virtY, cw, virtH)', hud);
+  const status = display.indexOf('_stDrawer(o, dx, dy, dw, dh)', hud);
   const menu = display.indexOf(
     '_menuDrawer(overlay, 0, 0, _overlayCanvas.width, _overlayCanvas.height)',
     status,

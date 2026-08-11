@@ -5,7 +5,7 @@
 //   dc_source = R_GetColumn(skytexture, angle)
 //   dc_colormap = colormaps          // fullbright
 //   dc_texturemid = 100*FRACUNIT
-//   dc_iscale = pspriteiscale        // 1 sky-row per screen-row at 320x200
+//   dc_iscale = pspriteiscale>>detailshift
 // The sky is therefore a 2D overlay anchored to viewangle (slides
 // horizontally) with a fixed vertical anchor at row 100 — it does NOT live
 // in 3D space.
@@ -23,6 +23,9 @@ import { GameMode_t } from './doomdef.js';
 import { R_CheckTextureNumForName, R_GetWallTexture } from './r_data.js';
 import { R_GetPaletteTexture, R_GetColormapTexture } from './r_shader.js';
 import { camera } from './i_video.js';
+import { R_GetViewSize } from './r_view.js';
+import { R_SkyRowStep, SKY_TEXTUREMID } from './r_sky_logic.js';
+import { FRACUNIT } from './m_fixed.js';
 
 export let skytexture = -1;
 export let skytexturemid = 0;
@@ -67,7 +70,7 @@ export function R_InitSkyMap() {
     else                        name = 'SKY4';
   }
   skytexture = R_CheckTextureNumForName(name);
-  skytexturemid = 100 << 16;
+  skytexturemid = SKY_TEXTUREMID;
 }
 
 // Vertex shader: pass-through NDC. PlaneGeometry(2,2) already spans
@@ -92,6 +95,9 @@ uniform sampler2D colormap;     // 256×34 R8
 uniform float viewangle;        // radians (Doom convention: 0 = +X, increases CCW)
 uniform float hfovHalfTan;      // tan(horizontal FOV / 2) — = tan(vfov/2)*aspect
 uniform float skyTexHeight;     // sky texture height in pixels (typically 128)
+uniform float skyTextureMid;    // skytexturemid in texture rows (100)
+uniform float skyRowScale;      // (pspriteiscale>>detailshift) / FRACUNIT
+uniform float skyViewHeight;    // current logical viewheight
 
 varying vec2 vUv;
 
@@ -113,15 +119,16 @@ void main() {
   // RepeatWrapping on the texture handles the modulo.
   float skyU = angle / 1.5707963267948966;
 
-  // Vertical — vanilla column drawer:
-  //   texRow = (dc_texturemid + (y - centery) * dc_iscale) >> 16
-  // with centery=100, dc_texturemid=100<<16, dc_iscale=FRACUNIT — i.e.
-  // texRow = doom_screen_y, where doom_screen_y runs 0 (top) to 199 (bottom).
-  // The mapping is independent of canvas size: 200 sky-rows always cover the
-  // full canvas height. The upper half of the canvas shows texture rows 0..100
-  // exactly like vanilla.
-  float texRow = (1.0 - vUv.y) * 200.0;
-  float skyV = mod(texRow, skyTexHeight) / skyTexHeight;
+  // Vertical — R_DrawColumn starts each local view row at:
+  //   skytexturemid + (y-centery) * (pspriteiscale>>detailshift)
+  // Reduced views therefore crop a scaled slice of the sky texture rather
+  // than stretching source rows 0..199 into every viewport.
+  float screenY = floor((1.0 - vUv.y) * skyViewHeight);
+  float texRow = floor(
+    skyTextureMid + (screenY - floor(skyViewHeight * 0.5)) * skyRowScale
+  );
+  float wrappedRow = mod(mod(texRow, skyTexHeight) + skyTexHeight, skyTexHeight);
+  float skyV = wrappedRow / skyTexHeight;
 
   // Indexed sample → palette → fullbright (r_plane.c:404 dc_colormap =
   // colormaps[0]).
@@ -160,6 +167,9 @@ export function R_BuildSky(levelRoot) {
       viewangle:    { value: 0 },
       hfovHalfTan:  { value: 1.0 },
       skyTexHeight: { value: map.image.height },
+      skyTextureMid: { value: skytexturemid / FRACUNIT },
+      skyRowScale:  { value: 1.0 },
+      skyViewHeight: { value: 200.0 },
     },
     vertexShader:   SKY_VERT,
     fragmentShader: SKY_FRAG,
@@ -193,4 +203,9 @@ export function R_UpdateSky() {
     _cachedAspect = camera.aspect;
     _skyMat.uniforms.hfovHalfTan.value = _hfovHalfTan;
   }
+  const view = R_GetViewSize();
+  _skyMat.uniforms.skyTextureMid.value = skytexturemid / FRACUNIT;
+  _skyMat.uniforms.skyRowScale.value =
+    R_SkyRowStep(view.viewwidth, view.detailshift) / FRACUNIT;
+  _skyMat.uniforms.skyViewHeight.value = view.viewheight;
 }

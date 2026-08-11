@@ -2,6 +2,12 @@
 // the WebGL world-sprite path.  Keeping the integer decisions here makes the
 // renderer's translation/COLORMAP precedence testable without a DOM or GL.
 
+import {
+  MAXLIGHTSCALE,
+  REFERENCE_SCREENWIDTH,
+  R_ScalelightRow,
+} from './r_light_logic.js';
+
 export const SPRITE_FF_FULLBRIGHT = 0x8000;
 export const SPRITE_MF_SHADOW = 0x40000;
 export const SPRITE_MF_TRANSLATION = 0x0c000000;
@@ -18,10 +24,6 @@ export const SPRITE_SHADOW_FLICKER = 0.09;
 // are literal COLORMAP rows.
 export const PSPRITE_SHADOW_ROW = -1;
 
-function clamp(value, low, high) {
-  return Math.min(Math.max(value, low), high);
-}
-
 // r_things.c:R_DrawPlayerSprites blinks the weapon back to normal during the
 // final four seconds of partial invisibility. MF_SHADOW remains set for that
 // whole interval, so the power timer (not the mobj flag) must select fuzz.
@@ -31,16 +33,27 @@ export function R_IsPspriteInvisible(invisibilityPower) {
 
 // r_things.c:R_DrawPlayerSprites / R_DrawPSprite selects the psprite drawer in
 // this order: invisibility fuzz, fixed colormap, fullbright, normal lighting.
-// Normal psprites always use scalelight[MAXLIGHTSCALE-1], whose row offset is
-// floor(47 / DISTMAP) == 23 at Doom's 320-wide reference view.
-export function R_PspriteColormapRow(invisible, fixedColormap, frame, sectorLightLevel, extralight) {
+// Normal psprites always use scalelight[MAXLIGHTSCALE-1]. The selected table
+// is rebuilt for scaledviewwidth, so reduced views darken that last entry by
+// j*SCREENWIDTH/scaledviewwidth/DISTMAP just like walls and world sprites.
+export function R_PspriteColormapRow(
+  invisible,
+  fixedColormap,
+  frame,
+  sectorLightLevel,
+  extralight,
+  scaledViewWidth = REFERENCE_SCREENWIDTH,
+) {
   if (invisible) return PSPRITE_SHADOW_ROW;
   if (fixedColormap !== 0) return fixedColormap;
   if ((frame & SPRITE_FF_FULLBRIGHT) !== 0) return 0;
 
-  const lightBucket = sectorLightLevel >> 4;
-  const light = clamp(lightBucket + extralight, 0, 15);
-  return clamp(((15 - light) * 4) - 23, 0, 31);
+  return R_ScalelightRow(
+    sectorLightLevel >> 4,
+    extralight,
+    MAXLIGHTSCALE - 1,
+    scaledViewWidth,
+  );
 }
 
 // Resolve one patch palette index through the already-selected psprite mode.

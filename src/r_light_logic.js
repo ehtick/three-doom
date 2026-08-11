@@ -7,12 +7,11 @@ export const MAXLIGHTSCALE = 48;
 export const MAXLIGHTZ = 128;
 export const NUMCOLORMAPS = 32;
 export const DISTMAP = 2;
+export const REFERENCE_SCREENWIDTH = 320;
 
-// The port keeps Doom's 320-pixel-wide, 90-degree horizontal projection even
-// when the canvas is resized.  At that reference projection, rw_scale >> 12
-// is floor((SCREENWIDTH / 2) * 16 / perpendicularDepth).
-export const LIGHT_PROJECTION = 160;
-export const WALL_SCALE_NUMERATOR = LIGHT_PROJECTION * 16;
+// zlight always uses the reference SCREENWIDTH/2 numerator. Scalelight uses
+// the current view projection and is handled separately below.
+export const LIGHT_PROJECTION = REFERENCE_SCREENWIDTH / 2;
 
 function clamp(value, low, high) {
   return Math.min(Math.max(value, low), high);
@@ -23,13 +22,42 @@ function startMap(lightBucket, extralight) {
   return (((LIGHTLEVELS - 1 - light) * 2) * NUMCOLORMAPS / LIGHTLEVELS) | 0;
 }
 
-// r_segs.c:R_RenderSegLoop / R_RenderMaskedSegRange plus the scalelight table
-// built by r_main.c:R_ExecuteSetViewSize at viewwidth == SCREENWIDTH.
-export function R_WallLightRow(lightBucket, extralight, viewDepth) {
-  const depth = Math.max(viewDepth, 1 / 65536);
-  const scaleIndex = Math.min(Math.floor(WALL_SCALE_NUMERATOR / depth), MAXLIGHTSCALE - 1);
-  const level = startMap(lightBucket, extralight) - Math.floor(scaleIndex / DISTMAP);
+export function R_ScalelightAttenuation(scaleIndex, scaledViewWidth = REFERENCE_SCREENWIDTH) {
+  const width = Math.max(1, scaledViewWidth | 0);
+  // Keep the two integer divisions separate: r_main.c evaluates
+  // j*SCREENWIDTH/scaledviewwidth/DISTMAP from left to right.
+  return Math.floor(Math.floor(scaleIndex * REFERENCE_SCREENWIDTH / width) / DISTMAP);
+}
+
+export function R_ScalelightRow(
+  lightBucket,
+  extralight,
+  scaleIndex,
+  scaledViewWidth = REFERENCE_SCREENWIDTH,
+) {
+  const index = clamp(scaleIndex | 0, 0, MAXLIGHTSCALE - 1);
+  const level = startMap(lightBucket, extralight) -
+    R_ScalelightAttenuation(index, scaledViewWidth);
   return clamp(level, 0, NUMCOLORMAPS - 1);
+}
+
+export function R_ScaleIndexForDepth(viewDepth, scaledViewWidth = REFERENCE_SCREENWIDTH) {
+  const depth = Math.max(viewDepth, 1 / 65536);
+  const numerator = Math.max(1, scaledViewWidth | 0) * 8;
+  return Math.min(Math.floor(numerator / depth), MAXLIGHTSCALE - 1);
+}
+
+// r_segs.c:R_RenderSegLoop / R_RenderMaskedSegRange and
+// r_things.c:R_ProjectSprite use a projection based on the current viewwidth,
+// then select the scalelight table rebuilt for scaledviewwidth.
+export function R_WallLightRow(
+  lightBucket,
+  extralight,
+  viewDepth,
+  scaledViewWidth = REFERENCE_SCREENWIDTH,
+) {
+  const scaleIndex = R_ScaleIndexForDepth(viewDepth, scaledViewWidth);
+  return R_ScalelightRow(lightBucket, extralight, scaleIndex, scaledViewWidth);
 }
 
 // r_plane.c:R_MapPlane plus the zlight table built by

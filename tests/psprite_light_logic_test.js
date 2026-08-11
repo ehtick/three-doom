@@ -6,6 +6,7 @@ import {
   SPRITE_FF_FULLBRIGHT,
   SPRITE_SHADOW_PALETTE_INDEX,
 } from '../src/r_sprite_logic.js';
+import { R_CalculateViewSize } from '../src/r_view.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -17,9 +18,10 @@ function clamp(value, low, high) {
   return Math.min(Math.max(value, low), high);
 }
 
-function vanillaNormalRow(lightlevel, extralight) {
+function vanillaNormalRow(lightlevel, extralight, scaledViewWidth = 320) {
   const light = clamp((lightlevel >> 4) + extralight, 0, 15);
-  return clamp(((15 - light) * 4) - 23, 0, 31);
+  const attenuation = Math.trunc(Math.trunc(47 * 320 / scaledViewWidth) / 2);
+  return clamp(((15 - light) * 4) - attenuation, 0, 31);
 }
 
 Deno.test('psprite invisibility fuzz follows the final-four-seconds blink timer', () => {
@@ -66,13 +68,16 @@ Deno.test('psprite normal light row matches every sector bucket boundary and ext
     for (const delta of [-1, 0, 1]) levels.add(boundary + delta);
   }
 
-  for (const lightlevel of levels) {
-    for (let extralight = -2; extralight <= 2; extralight++) {
-      assertEquals(
-        R_PspriteColormapRow(false, 0, 0, lightlevel, extralight),
-        vanillaNormalRow(lightlevel, extralight),
-        `lightlevel=${lightlevel} extralight=${extralight}`,
-      );
+  for (let blocks = 3; blocks <= 11; blocks++) {
+    const width = R_CalculateViewSize(blocks).scaledviewwidth;
+    for (const lightlevel of levels) {
+      for (let extralight = -2; extralight <= 2; extralight++) {
+        assertEquals(
+          R_PspriteColormapRow(false, 0, 0, lightlevel, extralight, width),
+          vanillaNormalRow(lightlevel, extralight, width),
+          `blocks=${blocks} lightlevel=${lightlevel} extralight=${extralight}`,
+        );
+      }
     }
   }
 });
