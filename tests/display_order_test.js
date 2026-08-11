@@ -1,6 +1,7 @@
 import { D_PausePatchPosition } from '../src/d_display_logic.js';
 
 const source = await Deno.readTextFile(new URL('../src/d_main.js', import.meta.url));
+const menuSource = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
 
 Deno.test('automap suppresses psprites without suppressing HUD or status bar', () => {
   const displayStart = source.indexOf('function D_Display()');
@@ -50,5 +51,15 @@ Deno.test('pause patch is composed after state drawers and before the menu', () 
   const menu = display.lastIndexOf('_menuDrawer(overlay, 0, 0, _overlayCanvas.width, _overlayCanvas.height)');
   if (finale < 0 || pause <= finale || menu <= pause) {
     throw new Error('pause/menu composition is not state drawers -> M_PAUSE -> menu');
+  }
+});
+
+Deno.test('menu patches do not add a non-vanilla translucent backdrop', () => {
+  const drawerStart = menuSource.indexOf('export function M_Drawer(');
+  const drawerEnd = menuSource.indexOf('// ---------- API expected', drawerStart);
+  const drawer = menuSource.slice(drawerStart, drawerEnd);
+  if (drawerStart < 0 || drawerEnd < 0 ||
+      drawer.includes('globalAlpha') || drawer.includes('fillRect(')) {
+    throw new Error('M_Drawer adds a background blend that is absent from m_menu.c');
   }
 });

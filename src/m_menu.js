@@ -505,18 +505,14 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   if (_currentMenu === null) return;
   const m = _currentMenu;
   // Letterbox the menu layout to a 4:3 box centered in the passed area so
-  // patches and items don't stretch with window aspect. Background dim and
-  // modal overlay still cover the full passed box.
+  // patches and items don't stretch with window aspect. Vanilla draws the
+  // menu patches directly over the current screen; it does not dim the
+  // background (m_menu.c:M_Drawer).
   const scale = Math.min(dstW / 320, dstH / 200);
   const sx = scale, sy = scale;
   const lx = dstX + (dstW - 320 * scale) * 0.5;
   const ly = dstY + (dstH - 200 * scale) * 0.5;
   _lastLayout = { lx, ly, sx, sy };
-  // Background dim only when not over title screen.
-  if (gamestate === 0 /*GS_LEVEL*/) {
-    overlayCtx.fillStyle = V_PaletteCSS(0, 0.6);
-    overlayCtx.fillRect(dstX, dstY, dstW, dstH);
-  }
   if (m.fullscreen) {
     const help = getPatch(m.fullscreen);
     if (help !== null) drawPatchAt(overlayCtx, help, lx, ly, sx, sy);
@@ -567,8 +563,8 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
 }
 
 function drawMessage(ctx, dstX, dstY, dstW, dstH) {
-  ctx.fillStyle = V_PaletteCSS(0, 0.85);
-  ctx.fillRect(dstX, dstY, dstW, dstH);
+  // m_menu.c:M_Drawer writes modal text directly over the current screen.
+  // Keep the framebuffer visible instead of adding a browser-only dim layer.
   ctx.fillStyle = V_PaletteCSS(256 - 47);
   ctx.font = `bold ${Math.round(dstH * 0.035)}px monospace`;
   ctx.textAlign = 'center';
