@@ -11,6 +11,7 @@ import { R_PointToAngle2 } from './r_bsp.js';
 import { M_Random } from './m_random.js';
 import { GameMode_t } from './doomdef.js';
 import { S_ChooseChannel } from './s_channel_logic.js';
+import { S_AttenuatedVolume } from './s_attenuation_logic.js';
 
 // Each channel: { sfxinfo, origin (mobj or null), handle }
 let channels = [];
@@ -110,8 +111,6 @@ function S_getChannel(origin, sfx) {
 // S_AdjustSoundParams — mirror vanilla. Returns null if inaudible, else
 // { vol, sep, pitch }. Distance > S_CLIPPING_DIST silences; between
 // S_CLOSE_DIST and S_CLIPPING_DIST volume tapers linearly.
-const S_CLOSE_DIST    = 160 * 65536;   // ~ vanilla constant in fixed-point
-const S_CLIPPING_DIST = 1200 * 65536;
 const NORM_PITCH      = 128;
 const NORM_SEP        = 128;
 
@@ -129,22 +128,11 @@ function S_AdjustSoundParams(listener, source) {
   const lmo = listener.mo;
   const dx = source.x - lmo.x;
   const dy = source.y - lmo.y;
-  let adist = approxDist(dx, dy);
-  // s_sound.c:773 — map 8 (the episode boss arena) never clips by distance.
-  if (gamemap !== 8 && adist > S_CLIPPING_DIST) return null;
-  // Volume is computed in snd_SfxVolume units (0..15) then scaled *8 to the
-  // 0..127 range i_sound.js expects (15*8 = 120 ~= 127 peak).
-  let vol;
-  if (adist < S_CLOSE_DIST) {
-    vol = snd_SfxVolume * 8;
-  } else if (gamemap === 8) {
-    // s_sound.c:800 — boss-arena taper floored at 15/15 so it stays loud.
-    if (adist > S_CLIPPING_DIST) adist = S_CLIPPING_DIST;
-    vol = (120 + (snd_SfxVolume * 8 - 120) *
-          (S_CLIPPING_DIST - adist) / (S_CLIPPING_DIST - S_CLOSE_DIST)) | 0;
-  } else {
-    vol = ((snd_SfxVolume * 8) * (S_CLIPPING_DIST - adist) / (S_CLIPPING_DIST - S_CLOSE_DIST)) | 0;
-  }
+  const adist = approxDist(dx, dy);
+  // Preserve s_sound.c's integer operation order, then apply the browser
+  // adapter's intentional *8 mapping only after Doom's 0..15 result exists.
+  const vol = S_AttenuatedVolume(adist, snd_SfxVolume, gamemap === 8);
+  if (vol === null) return null;
   // s_sound.c:600 — if source and listener share the same XY, pin sep to
   // NORM_SEP so the centre-pan stays stable. Otherwise R_PointToAngle2 of
   // a zero vector returns 0 and the angle-relative sin landed on whatever
