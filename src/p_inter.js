@@ -9,7 +9,7 @@ import { MT_MISC0, MT_MISC1, MT_MISC2, MT_MISC3, MT_MISC4, MT_MISC5, MT_MISC6,
          MT_INV, MT_MISC13, MT_INS, MT_MISC14, MT_MISC15, MT_MISC16, MT_MEGA,
          MT_CLIP, MT_MISC17, MT_MISC18, MT_MISC19, MT_MISC20, MT_MISC21,
          MT_MISC22, MT_MISC23, MT_MISC24, MT_MISC25, MT_CHAINGUN, MT_MISC26,
-         MT_MISC27, MT_MISC28, MT_SHOTGUN,
+         MT_MISC27, MT_MISC28, MT_SHOTGUN, MT_SUPERSHOTGUN,
          MT_POSSESSED, MT_SHOTGUY, MT_CHAINGUY, MT_WOLFSS, MT_SKULL, MT_VILE } from './info.js';
 // Re-export so p_inter.js owns the MT_* constants needed by P_KillMobj's drop logic.
 import { ammotype_t, weapontype_t, skill_t } from './doomdef.js';
@@ -174,6 +174,9 @@ export function P_TouchSpecialThing(special, toucher) {
     case MT_SHOTGUN:
       if (P_GiveWeapon(player, weapontype_t.wp_shotgun,  (special.flags & MF_DROPPED) !== 0) === false) return;
       sound = 33; player.message = 'You got the shotgun!'; break;
+    case MT_SUPERSHOTGUN:
+      if (P_GiveWeapon(player, weapontype_t.wp_supershotgun, (special.flags & MF_DROPPED) !== 0) === false) return;
+      sound = 33; player.message = 'You got the super shotgun!'; break;
     case MT_CHAINGUN:
       if (P_GiveWeapon(player, weapontype_t.wp_chaingun, (special.flags & MF_DROPPED) !== 0) === false) return;
       sound = 33; player.message = 'You got the chaingun!'; break;
