@@ -18,10 +18,53 @@ const watchdog = setTimeout(() => {
 }, 60000);
 const pageErrors = [];
 
+async function trackAudioContexts(page, failClose = false) {
+  await page.addInitScript(({ rejectClose }) => {
+    const NativeAudioContext = window.AudioContext || window.webkitAudioContext;
+    window.__doomAudioShutdown = {
+      created: 0,
+      live: 0,
+      closeCalls: 0,
+      closeSettled: 0,
+      order: [],
+    };
+    if (NativeAudioContext === undefined) return;
+
+    const state = window.__doomAudioShutdown;
+    const TrackedAudioContext = new Proxy(NativeAudioContext, {
+      construct(target, args) {
+        const context = Reflect.construct(target, args, target);
+        state.created++;
+        state.live++;
+        return context;
+      },
+    });
+    window.AudioContext = TrackedAudioContext;
+    if (window.webkitAudioContext === NativeAudioContext) {
+      window.webkitAudioContext = TrackedAudioContext;
+    }
+
+    const nativeClose = NativeAudioContext.prototype.close;
+    NativeAudioContext.prototype.close = function() {
+      state.closeCalls++;
+      state.order.push('sound');
+      if (rejectClose === true) {
+        return Promise.reject(new Error('intentional AudioContext.close failure'));
+      }
+      return Promise.resolve(nativeClose.call(this)).then((result) => {
+        state.closeSettled++;
+        state.live--;
+        return result;
+      });
+    };
+  }, { rejectClose: failClose });
+}
+
 try {
   browser = await chromium.launch(launchOptions);
   const page = await browser.newPage({ viewport: { width: 960, height: 600 } });
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await trackAudioContexts(page);
   const baseUrl = process.env.DOOM_URL ?? 'http://127.0.0.1:8093/';
   const url = new URL(baseUrl);
   url.searchParams.set('map', 'E1M1');
@@ -38,10 +81,18 @@ try {
     const events = await import('/src/d_event.js');
     const doomstat = await import('/src/doomstat.js');
     const wi = await import('/src/wi_stuff.js');
+    const system = await import('/src/i_system.js');
+    const sound = await import('/src/i_sound.js');
     const oldRenderer = window.renderer;
     const oldScene = window.scene;
     const oldCamera = window.camera;
     const oldCanvas = oldRenderer.domElement;
+    const nativeForceContextLoss = oldRenderer.forceContextLoss.bind(oldRenderer);
+    oldRenderer.forceContextLoss = () => {
+      window.__doomAudioShutdown.order.push('graphics');
+      return nativeForceContextLoss();
+    };
+    const musicWasPlaying = sound.I_QrySongPlaying(0);
     const makeWb = () => ({
       didsecret: false, epsd: 0, last: 0, next: 1,
       maxkills: 1, maxitems: 1, maxsecret: 1, pnum: 0,
@@ -105,12 +156,16 @@ try {
     // their continuations are invalidated and cannot reopen UI/pointer lock.
     document.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', key: 'Escape', bubbles: true }));
     document.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
-    window.dispatchEvent(new CustomEvent('doom:quit'));
+    system.I_Quit();
+    system.I_Quit();
     const first = iv.I_ShutdownGraphics();
     const second = iv.I_ShutdownGraphics();
     const samePromise = first === second;
     const report = await first;
     await second;
+    const firstSoundShutdown = sound.I_ShutdownSound();
+    const secondSoundShutdown = sound.I_ShutdownSound();
+    await firstSoundShutdown;
     const stoppedTic = doomstat.gametic;
 
     const eventHead = events.eventhead;
@@ -122,6 +177,10 @@ try {
 
     return {
       samePromise,
+      sameSoundPromise: firstSoundShutdown === secondSoundShutdown,
+      musicWasPlaying,
+      musicIsPlaying: sound.I_QrySongPlaying(0),
+      audioShutdown: { ...window.__doomAudioShutdown },
       report,
       disposed,
       expected: {
@@ -159,6 +218,7 @@ try {
   // level/RAF loop is guaranteed to have started. Startup must not resurrect it.
   const earlyPage = await browser.newPage({ viewport: { width: 640, height: 400 } });
   earlyPage.on('pageerror', (error) => pageErrors.push(`early: ${error.message}`));
+  await trackAudioContexts(earlyPage);
   await earlyPage.goto(url.href, { waitUntil: 'domcontentloaded' });
   await earlyPage.waitForFunction(() => window.renderer !== undefined, { timeout: 30000 });
   await earlyPage.evaluate(() => window.dispatchEvent(new CustomEvent('doom:quit')));
@@ -173,6 +233,7 @@ try {
         document.querySelector('#container canvas') === null,
       loopClosed: loop.D_DoomRafLoop.isClosed() === true && loop.D_DoomRafLoop.isRunning() === false,
       gametic: doomstat.gametic,
+      audioShutdown: { ...window.__doomAudioShutdown },
     };
   });
   await earlyPage.waitForTimeout(200);
@@ -183,13 +244,22 @@ try {
   // renderer/context/DOM or breaking repeated-call idempotency.
   const failurePage = await browser.newPage({ viewport: { width: 640, height: 400 } });
   failurePage.on('pageerror', (error) => pageErrors.push(`failure: ${error.message}`));
+  await trackAudioContexts(failurePage, true);
   await failurePage.goto(url.href, { waitUntil: 'domcontentloaded' });
   await failurePage.waitForFunction(() => window.renderer !== undefined, { timeout: 30000 });
   const failureCleanup = await failurePage.evaluate(async () => {
     const iv = await import('/src/i_video.js');
     const loop = await import('/src/d_loop.js');
+    const system = await import('/src/i_system.js');
+    const sound = await import('/src/i_sound.js');
     const oldRenderer = window.renderer;
+    const nativeForceContextLoss = oldRenderer.forceContextLoss.bind(oldRenderer);
+    oldRenderer.forceContextLoss = () => {
+      window.__doomAudioShutdown.order.push('graphics');
+      return nativeForceContextLoss();
+    };
     iv.I_RegisterGraphicsShutdownHook(() => { throw new Error('intentional shutdown-hook failure'); });
+    system.I_Quit();
     const first = iv.I_ShutdownGraphics();
     const second = iv.I_ShutdownGraphics();
     let rejected = false;
@@ -203,12 +273,24 @@ try {
         document.querySelector('#container canvas') === null,
       contextLost: oldRenderer.getContext().isContextLost(),
       loopClosed: loop.D_DoomRafLoop.isClosed() === true && loop.D_DoomRafLoop.isRunning() === false,
+      musicStopped: sound.I_QrySongPlaying(0) === false,
+      audioShutdown: { ...window.__doomAudioShutdown },
     };
   });
   await failurePage.close();
 
   const failures = [];
   if (!result.samePromise) failures.push('repeated shutdown did not return the same promise');
+  if (!result.sameSoundPromise) failures.push('repeated sound shutdown did not return the same promise');
+  if (!result.musicWasPlaying || result.musicIsPlaying) failures.push('music was not stopped by I_Quit');
+  if (result.audioShutdown.created !== 1 || result.audioShutdown.closeCalls !== 1 ||
+      result.audioShutdown.closeSettled !== 1 || result.audioShutdown.live !== 0) {
+    failures.push(`AudioContext was not closed exactly once: ${JSON.stringify(result.audioShutdown)}`);
+  }
+  if (result.audioShutdown.order.indexOf('sound') < 0 ||
+      result.audioShutdown.order.indexOf('graphics') <= result.audioShutdown.order.indexOf('sound')) {
+    failures.push(`sound did not shut down before graphics: ${JSON.stringify(result.audioShutdown.order)}`);
+  }
   if (!result.globalsCleared) failures.push('graphics globals were retained');
   if (!result.domCleared) failures.push('renderer DOM/scene objects were retained');
   if (!result.contextLost || !result.report.contextLost) failures.push('WebGL context was not released');
@@ -226,9 +308,17 @@ try {
   if (!early.clean || !early.loopClosed || earlyAfterTic !== early.gametic) {
     failures.push(`startup shutdown resurrected work (${early.gametic} -> ${earlyAfterTic})`);
   }
+  if (early.audioShutdown.live !== 0 || early.audioShutdown.created !== early.audioShutdown.closeCalls) {
+    failures.push(`startup shutdown leaked/recreated audio: ${JSON.stringify(early.audioShutdown)}`);
+  }
   if (!failureCleanup.rejected || !failureCleanup.samePromise || !failureCleanup.clean ||
-      !failureCleanup.contextLost || !failureCleanup.loopClosed) {
+      !failureCleanup.contextLost || !failureCleanup.loopClosed || !failureCleanup.musicStopped) {
     failures.push('failed shutdown hook stranded graphics cleanup');
+  }
+  if (failureCleanup.audioShutdown.closeCalls !== 1 ||
+      failureCleanup.audioShutdown.order.indexOf('graphics') <=
+        failureCleanup.audioShutdown.order.indexOf('sound')) {
+    failures.push(`failed audio close stranded/preceded graphics cleanup: ${JSON.stringify(failureCleanup.audioShutdown)}`);
   }
   if (result.disposed.geometries !== result.expected.geometries) failures.push(`level geometries disposed ${result.disposed.geometries}/${result.expected.geometries}`);
   if (result.disposed.materials !== result.expected.materials) failures.push(`level materials disposed ${result.disposed.materials}/${result.expected.materials}`);

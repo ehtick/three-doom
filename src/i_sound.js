@@ -15,8 +15,14 @@ let _ctx = null;        // AudioContext
 let _master = null;     // master GainNode (sfx volume)
 let _musicGain = null;  // music GainNode
 const _bufferCache = new Map(); // lumpName -> AudioBuffer
+let _soundShutdownStarted = false;
+let _soundShutdownPromise = null;
 
 function getCtx() {
+  // Page teardown is terminal. D_DoomMain can still resume
+  // from an already-pending import after doom:quit, so never recreate Web
+  // Audio once the shutdown path has claimed it.
+  if (_soundShutdownStarted === true) return null;
   if (_ctx === null) {
     _ctx = new (window.AudioContext || window.webkitAudioContext)();
     _master    = _ctx.createGain(); _master.gain.value = 1.0; _master.connect(_ctx.destination);
@@ -35,12 +41,13 @@ function getCtx() {
 // Chrome silently auto-resuming — it doesn't always, and a suspended context
 // means total silence.
 let _resumeInstalled = false;
+let _resumeHandler = null;
 function installResumeOnGesture() {
   if (_resumeInstalled || typeof window === 'undefined') return;
   _resumeInstalled = true;
-  const resume = () => { if (_ctx !== null && _ctx.state !== 'running') _ctx.resume().catch(() => {}); };
+  _resumeHandler = () => { if (_ctx !== null && _ctx.state !== 'running') _ctx.resume().catch(() => {}); };
   for (const ev of ['pointerdown', 'mousedown', 'keydown', 'touchstart']) {
-    window.addEventListener(ev, resume, { passive: true });
+    window.addEventListener(ev, _resumeHandler, { passive: true });
   }
 }
 
@@ -90,13 +97,65 @@ function getBuffer(name) {
 
 // SFX info table — name + priority. Filled by S_Init from sounds.c.
 let _sfxInfo = null;
-export function I_RegisterSfxInfo(info) { _sfxInfo = info; }
+export function I_RegisterSfxInfo(info) {
+  if (_soundShutdownStarted === false) _sfxInfo = info;
+}
 
-export function I_InitSound() { getCtx(); }
+export function I_InitSound() {
+  if (_soundShutdownStarted === false) getCtx();
+}
 export function I_UpdateSound() {}
 export function I_SubmitSound() {}
 export function I_ShutdownSound() {
-  if (_ctx !== null) { _ctx.close(); _ctx = null; }
+  if (_soundShutdownPromise !== null) return _soundShutdownPromise;
+  _soundShutdownStarted = true;
+
+  // Claim every owned object synchronously. This makes repeated calls and
+  // pending startup continuations harmless even while AudioContext.close()
+  // is still settling.
+  const ownedContext = _ctx;
+  _ctx = null;
+  const ownedMusicNode = _musicNode;
+  _musicNode = null;
+  const ownedMaster = _master;
+  _master = null;
+  const ownedMusicGain = _musicGain;
+  _musicGain = null;
+  _oplReady = false;
+
+  if (_resumeHandler !== null && typeof window !== 'undefined') {
+    for (const ev of ['pointerdown', 'mousedown', 'keydown', 'touchstart']) {
+      window.removeEventListener(ev, _resumeHandler);
+    }
+  }
+  _resumeHandler = null;
+  _resumeInstalled = false;
+
+  for (const entry of _activeSources.values()) {
+    entry.src.onended = null;
+    try { entry.src.stop(); } catch (_) {}
+    try { entry.src.disconnect(); } catch (_) {}
+    try { entry.gain?.disconnect(); } catch (_) {}
+    try { entry.panner?.disconnect(); } catch (_) {}
+  }
+  _activeSources.clear();
+  try {
+    if (ownedMusicNode !== null) {
+      ownedMusicNode.onaudioprocess = null;
+      ownedMusicNode.disconnect();
+    }
+  } catch (_) {}
+  try { ownedMaster?.disconnect(); } catch (_) {}
+  try { ownedMusicGain?.disconnect(); } catch (_) {}
+  _bufferCache.clear();
+  _sfxInfo = null;
+
+  _soundShutdownPromise = (async () => {
+    if (ownedContext !== null && ownedContext.state !== 'closed') {
+      await ownedContext.close();
+    }
+  })();
+  return _soundShutdownPromise;
 }
 
 // i_sound.c surface area expected by s_sound.c. Web Audio mixes natively,
@@ -219,11 +278,13 @@ const MUSIC_BUFSIZE = 4096;
 // still autoplay-suspended; it begins firing once a user gesture resumes the
 // context (installResumeOnGesture).
 function ensureOpl() {
-  if (_oplReady) return;
+  if (_soundShutdownStarted === true) return false;
+  if (_oplReady) return true;
   const ctx = getCtx();
+  if (ctx === null) return false;
   OPL.OPL_InitMusic(ctx.sampleRate);
   const lumpnum = W_CheckNumForName('GENMIDI');
-  if (lumpnum === -1) return; // no instrument bank -> no music (no fallback)
+  if (lumpnum === -1) return false; // no instrument bank -> no music (no fallback)
   OPL.OPL_LoadGenmidi(W_CacheLumpNum(lumpnum, 0));
   // ScriptProcessor renders the OPL chip on the main thread, feeding the music
   // bus. (1,1) channels; only the output is connected.
@@ -234,6 +295,7 @@ function ensureOpl() {
   };
   _musicNode.connect(_musicGain);
   _oplReady = true;
+  return true;
 }
 
 // Doom drives music volume on the 0..15 menu scale; map it to the bus gain.
@@ -245,8 +307,7 @@ export function I_SetMusicVolume(vol) {
 export function I_PauseSong(_handle)  { OPL.I_OPL_PauseSong(); }
 export function I_ResumeSong(_handle) { OPL.I_OPL_ResumeSong(); }
 export function I_PlaySong(_handle, looping) {
-  ensureOpl();
-  OPL.I_OPL_PlaySong(!!looping);
+  if (ensureOpl() === true) OPL.I_OPL_PlaySong(!!looping);
 }
 export function I_StopSong(_handle)   { OPL.I_OPL_StopSong(); }
 export function I_UnRegisterSong(_handle) { OPL.I_OPL_StopSong(); }
@@ -255,7 +316,7 @@ export function I_UnRegisterSong(_handle) { OPL.I_OPL_StopSong(); }
 export function I_RegisterSong(bytes) {
   if (bytes === null || bytes === undefined || bytes.length < 16) return 0;
   if (bytes[0] !== 0x4D || bytes[1] !== 0x55 || bytes[2] !== 0x53 || bytes[3] !== 0x1A) return 0;
-  ensureOpl();
+  if (ensureOpl() !== true) return 0;
   OPL.I_OPL_RegisterSong(bytes);
   return 1;
 }

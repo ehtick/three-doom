@@ -114,9 +114,11 @@ function onRendererClick(e) {
 }
 
 function onDoomQuit() {
-  // Sound owns its AudioContext and resume-on-gesture hooks; I_Quit's graphics
-  // path deliberately leaves those for I_ShutdownSound/I_ShutdownMusic.
-  void I_ShutdownGraphics();
+  // Browser teardown is asynchronous; report failure without allowing an
+  // event-listener promise rejection to escape as an unhandled rejection.
+  void I_ShutdownGraphics().catch((error) => {
+    console.error('I_Quit teardown failed:', error);
+  });
 }
 
 export function I_InitGraphics() {
@@ -268,7 +270,8 @@ export function I_ShutdownGraphics() {
     let disposedLevelObjects = 0;
     let contextLost = ownedRenderer === null;
     try {
-      const [dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, rBorder, fWipe, vVideo, hu, wi, finale] = await Promise.all([
+      const [iSound, dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, rBorder, fWipe, vVideo, hu, wi, finale] = await Promise.all([
+        import('./i_sound.js'),
         import('./d_main.js'),
         import('./d_keyboard.js'),
         import('./d_freecamera.js'),
@@ -284,6 +287,9 @@ export function I_ShutdownGraphics() {
         import('./f_finale.js'),
       ]);
       const cleanupSteps = [
+        // i_system.c:I_Quit shuts down SFX, then music, before graphics.
+        () => iSound.I_ShutdownSound(),
+        () => iSound.I_ShutdownMusic(),
         () => dMain.D_ShutdownDoomLoop(),
         () => keyboard.D_KeyboardInput.shutdown(),
         () => freeCamera.D_FreeCamera.shutdown(),
@@ -300,7 +306,7 @@ export function I_ShutdownGraphics() {
         () => R_ShutdownShader(),
       ];
       for (const cleanup of cleanupSteps) {
-        try { cleanup(); } catch (error) { cleanupErrors.push(error); }
+        try { await cleanup(); } catch (error) { cleanupErrors.push(error); }
       }
     } catch (error) {
       cleanupErrors.push(error);
