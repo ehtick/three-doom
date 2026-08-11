@@ -17,7 +17,8 @@ import {
   V_GetActivePalette, V_InitPlaypal, V_IsPlaypalReady,
   V_PaletteCSS, V_SetPaletteIndex,
 } from './v_palette.js';
-import { R_SetPaletteIndex, R_SetPlaypal } from './r_shader.js';
+import { R_SetPaletteIndex, R_SetPlaypal, R_ShutdownShader } from './r_shader.js';
+import { D_DoomRafLoop } from './d_loop.js';
 
 // ---------- Three.js setup ----------
 export let renderer = null;
@@ -46,12 +47,58 @@ let scratchCanvas = null;
 // is only needed to break the i_video ↔ m_menu cycle at startup.
 let _mMenu    = null;
 let _doomstat = null;
-import('./m_menu.js').then((m)  => { _mMenu    = m; });
-import('./doomstat.js').then((d) => { _doomstat = d; });
+import('./m_menu.js').then((m)  => { if (_shuttingDown === false) _mMenu = m; });
+import('./doomstat.js').then((d) => { if (_shuttingDown === false) _doomstat = d; });
 
 let _onPointerLockChange = null;
+let _rendererClickTarget = null;
+let _shutdownPromise = null;
+let _shuttingDown = false;
+const _shutdownHooks = new Set();
+
+// Input modules register their listener cleanup here. This lets graphics
+// shutdown detach input synchronously before its async resource imports yield.
+export function I_RegisterGraphicsShutdownHook(hook) {
+  if (_shuttingDown === true) {
+    hook();
+    return () => {};
+  }
+  _shutdownHooks.add(hook);
+  return () => { _shutdownHooks.delete(hook); };
+}
+
+function onRendererClick(e) {
+  if (_shuttingDown === true || renderer === null || _doomstat === null) return;
+  // Menu open → route the tap into the menu, before the level pointer-lock
+  // grab below so it isn't swallowed into recapturing the mouse.
+  if (_doomstat.menuactive === true && _mMenu !== null && overlayCanvas !== null) {
+    const rect = overlayCanvas.getBoundingClientRect();
+    _mMenu.M_HandleTap(e.clientX - rect.left, e.clientY - rect.top);
+    return;
+  }
+  if (_doomstat.gamestate === 0 /*GS_LEVEL*/ && _doomstat.demoplayback !== true) {
+    if (document.pointerLockElement !== renderer.domElement) {
+      renderer.domElement.requestPointerLock?.();
+    }
+    return;
+  }
+  // Intermission / finale own their own input — clicking should not hijack
+  // them into opening the menu, or the user can never get past them.
+  if (_doomstat.gamestate === 1 /*GS_INTERMISSION*/ ||
+      _doomstat.gamestate === 2 /*GS_FINALE*/) return;
+  if (_doomstat.menuactive !== true && _mMenu !== null) _mMenu.M_StartControlPanel();
+}
+
+function onDoomQuit() {
+  // Sound owns its AudioContext and resume-on-gesture hooks; I_Quit's graphics
+  // path deliberately leaves those for I_ShutdownSound/I_ShutdownMusic.
+  void I_ShutdownGraphics();
+}
 
 export function I_InitGraphics() {
+  if (renderer !== null || _shutdownPromise !== null) {
+    throw new Error('I_InitGraphics: graphics already initialized or shut down');
+  }
   // Three.js renderer
   const container = document.getElementById('container');
   renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -91,29 +138,8 @@ export function I_InitGraphics() {
   // Mouse (pointer lock for FPS-style mouse look) — only acquire inside an
   // interactive level. The title screen, menu, and demo playback all keep the
   // pointer free so the user can navigate / leave without being captured.
-  renderer.domElement.addEventListener('click', (e) => {
-    if (_doomstat === null) return;
-    // Menu open → route the tap into the menu, before the level pointer-lock
-    // grab below so it isn't swallowed into recapturing the mouse.
-    if (_doomstat.menuactive === true && _mMenu !== null) {
-      const rect = overlayCanvas.getBoundingClientRect();
-      _mMenu.M_HandleTap(e.clientX - rect.left, e.clientY - rect.top);
-      return;
-    }
-    if (_doomstat.gamestate === 0 /*GS_LEVEL*/ && _doomstat.demoplayback !== true) {
-      if (document.pointerLockElement !== renderer.domElement) {
-        renderer.domElement.requestPointerLock?.();
-      }
-      return;
-    }
-    // Intermission / finale own their own input — clicking should not hijack
-    // them into opening the menu, or the user can never get past them.
-    if (_doomstat.gamestate === 1 /*GS_INTERMISSION*/ ||
-        _doomstat.gamestate === 2 /*GS_FINALE*/) return;
-    // Outside active gameplay, surface the main menu so the user doesn't
-    // have to guess which key wakes it up.
-    if (_doomstat.menuactive !== true && _mMenu !== null) _mMenu.M_StartControlPanel();
-  });
+  _rendererClickTarget = renderer.domElement;
+  _rendererClickTarget.addEventListener('click', onRendererClick);
   window.addEventListener('mousemove', onMouseMove);
   window.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mouseup',   onMouseUp);
@@ -141,6 +167,7 @@ export function I_InitGraphics() {
   // window after G_Ticker dispatches ga_screenshot. We grab the WebGL canvas,
   // composite the 2D overlay on top, and trigger a download.
   window.addEventListener('doom:screenshot', captureScreenshot);
+  window.addEventListener('doom:quit', onDoomQuit);
 }
 
 function captureScreenshot() {
@@ -167,7 +194,18 @@ function captureScreenshot() {
 }
 
 export function I_ShutdownGraphics() {
-  if (renderer) renderer.dispose();
+  // This happens before any asynchronous teardown work, so neither a queued
+  // RAF nor a callback stopped from inside a ticker can render disposed state.
+  D_DoomRafLoop.close();
+  if (_shutdownPromise !== null) return _shutdownPromise;
+  _shuttingDown = true;
+
+  const ownedRenderer = renderer;
+  const ownedScene = scene;
+  const ownedCamera = camera;
+  const ownedOverlay = overlayCanvas;
+  const ownedWebGLCanvas = _rendererClickTarget ?? ownedRenderer?.domElement ?? null;
+
   window.removeEventListener('resize', resize);
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keyup',   onKeyUp);
@@ -175,10 +213,110 @@ export function I_ShutdownGraphics() {
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mouseup',   onMouseUp);
   window.removeEventListener('doom:screenshot', captureScreenshot);
+  window.removeEventListener('doom:quit', onDoomQuit);
+  if (_rendererClickTarget !== null) {
+    _rendererClickTarget.removeEventListener('click', onRendererClick);
+    _rendererClickTarget = null;
+  }
   if (_onPointerLockChange !== null) {
     document.removeEventListener('pointerlockchange', _onPointerLockChange);
     _onPointerLockChange = null;
   }
+  const cleanupErrors = [];
+  // Remove the pointer-lock observer first: exitPointerLock fires a
+  // pointerlockchange event which must not reopen the menu during shutdown.
+  if (ownedWebGLCanvas !== null && document.pointerLockElement === ownedWebGLCanvas) {
+    try { document.exitPointerLock?.(); } catch (error) { cleanupErrors.push(error); }
+  }
+  for (const hook of [..._shutdownHooks]) {
+    try { hook(); } catch (error) { cleanupErrors.push(error); }
+  }
+  _shutdownHooks.clear();
+  mouseButtons = 0;
+
+  _shutdownPromise = (async () => {
+    let disposedLevelObjects = 0;
+    let contextLost = ownedRenderer === null;
+    try {
+      const [dMain, keyboard, freeCamera, rMain, rData, rThings, rPsprite, fWipe, vVideo, hu, wi, finale] = await Promise.all([
+        import('./d_main.js'),
+        import('./d_keyboard.js'),
+        import('./d_freecamera.js'),
+        import('./r_main.js'),
+        import('./r_data.js'),
+        import('./r_things.js'),
+        import('./r_psprite.js'),
+        import('./f_wipe.js'),
+        import('./v_video.js'),
+        import('./hu_stuff.js'),
+        import('./wi_stuff.js'),
+        import('./f_finale.js'),
+      ]);
+      const cleanupSteps = [
+        () => dMain.D_ShutdownDoomLoop(),
+        () => keyboard.D_KeyboardInput.shutdown(),
+        () => freeCamera.D_FreeCamera.shutdown(),
+        () => { disposedLevelObjects = rMain.R_Shutdown(); },
+        () => rThings.R_ShutdownThings(),
+        () => rPsprite.R_ShutdownPlayerSprites(),
+        () => fWipe.wipe_Shutdown(),
+        () => hu.HU_Shutdown(),
+        () => wi.WI_Shutdown(),
+        () => finale.F_Shutdown(),
+        () => vVideo.V_ShutdownCanvases(),
+        () => rData.R_ShutdownData(),
+        () => R_ShutdownShader(),
+      ];
+      for (const cleanup of cleanupSteps) {
+        try { cleanup(); } catch (error) { cleanupErrors.push(error); }
+      }
+    } catch (error) {
+      cleanupErrors.push(error);
+    } finally {
+      try { if (ownedScene !== null) ownedScene.clear(); } catch (error) { cleanupErrors.push(error); }
+      try {
+        if (ownedOverlay !== null) {
+          ownedOverlay.getContext('2d')?.clearRect(0, 0, ownedOverlay.width, ownedOverlay.height);
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      if (ownedRenderer !== null) {
+        try { ownedRenderer.renderLists.dispose(); } catch (error) { cleanupErrors.push(error); }
+        try { ownedRenderer.dispose(); } catch (error) { cleanupErrors.push(error); }
+        try { ownedRenderer.forceContextLoss(); } catch (error) { cleanupErrors.push(error); }
+        try { contextLost = ownedRenderer.getContext().isContextLost(); } catch (error) { cleanupErrors.push(error); }
+      }
+      try { ownedWebGLCanvas?.remove(); } catch (error) { cleanupErrors.push(error); }
+
+      try {
+        if (typeof window !== 'undefined') {
+          if (window.renderer === ownedRenderer) delete window.renderer;
+          if (window.scene === ownedScene) delete window.scene;
+          if (window.camera === ownedCamera) delete window.camera;
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      renderer = null;
+      scene = null;
+      camera = null;
+      overlayCanvas = null;
+      overlayCtx = null;
+      rgbaBuffer = null;
+      try {
+        if (scratchCanvas !== null) {
+          scratchCanvas.width = 0;
+          scratchCanvas.height = 0;
+        }
+      } catch (error) { cleanupErrors.push(error); }
+      scratchCanvas = null;
+      _mMenu = null;
+      _doomstat = null;
+    }
+
+    if (cleanupErrors.length !== 0) {
+      throw new AggregateError(cleanupErrors, 'I_ShutdownGraphics cleanup failed');
+    }
+    return { disposedLevelObjects, contextLost };
+  })();
+  return _shutdownPromise;
 }
 
 function resize() {

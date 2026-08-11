@@ -184,6 +184,14 @@ export function R_ClearSpriteCache() {
   _spriteTextureCache.clear();
 }
 
+export function R_ShutdownThings() {
+  _liveSprites.length = 0;
+  _thingsGroup = null;
+  viewx = 0;
+  viewy = 0;
+  R_ClearSpriteCache();
+}
+
 // Track live billboards so we can update them per-frame from mobj state.
 const _liveSprites = []; // [{ sprite: THREE.Sprite, mobj: mobj_t }, ...]
 // The level's 'things' THREE.Group. P_SpawnMobj-driven registrations add new

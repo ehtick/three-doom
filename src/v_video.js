@@ -307,13 +307,27 @@ const _patchCanvasCache = new Map();
 // External PNG files registered as patches (e.g. UI graphics that aren't in
 // the WAD). Lookup wins over the WAD path so callers don't need to know.
 const _pngOverrides = new Map();
+const _pendingPNGs = new Set();
+
+export function V_ShutdownCanvases() {
+  for (const img of _pendingPNGs) {
+    img.onload = null;
+    img.onerror = null;
+    img.src = '';
+  }
+  _pendingPNGs.clear();
+  _patchCanvasCache.clear();
+  _pngOverrides.clear();
+}
 // Load a PNG from `url` and expose it under `name` so V_DecodePatchToCanvas
 // returns it like a WAD patch. Asynchronous: until the image finishes
 // loading, the lookup falls through (the menu drawer's text fallback covers
 // the gap).
 export function V_RegisterPNGPatch(name, url, leftoffset = 0, topoffset = 0) {
   const img = new Image();
+  _pendingPNGs.add(img);
   img.onload = () => {
+    _pendingPNGs.delete(img);
     const c = document.createElement('canvas');
     c.width = img.naturalWidth; c.height = img.naturalHeight;
     const ctx = c.getContext('2d');
@@ -351,6 +365,7 @@ export function V_RegisterPNGPatch(name, url, leftoffset = 0, topoffset = 0) {
     _pngOverrides.set(name, info);
   };
   img.onerror = () => {
+    _pendingPNGs.delete(img);
     console.warn(`V_RegisterPNGPatch: failed to load "${name}" from ${url}`);
   };
   img.src = url;

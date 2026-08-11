@@ -31,6 +31,7 @@ import * as _PTick from './p_tick.js';
 import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 import { D_AccumulateTics } from './d_timing.js';
+import { D_DoomRafLoop } from './d_loop.js';
 import {
   G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
   P_RecordDeathMatchStart, G_CheckSpot as G_RunCheckSpot,
@@ -282,7 +283,57 @@ let _wiResponder = null;
 let _fDrawer = null;
 let _fTicker = null;
 let _isStatusBarVisible = null;
+
+function D_ClearLoopReferences() {
+  _lastTime = 0;
+  _ticAccum = 0;
+  _overlayCanvas = null;
+  _overlayCtx = null;
+  _oldDisplayGameState = -1;
+  _pTicker = null;
+  _updateSprites = null;
+  _drawPlayerSprites = null;
+  _huDrawer = null;
+  _stDrawer = null;
+  _stTicker = null;
+  _updateSky = null;
+  _stPalette = null;
+  _amDrawer = null;
+  _amTicker = null;
+  _menuDrawer = null;
+  _animTextures = null;
+  _fwipeDraw = null;
+  _fwipeActive = null;
+  _fwipeStep = null;
+  _gTicker = null;
+  _gCheckSpecial = null;
+  _gPlayDemo = null;
+  _gReadDemoCmd = null;
+  _huTicker = null;
+  _sUpdate = null;
+  _sStartMusic = null;
+  _menuTicker = null;
+  _wiDrawer = null;
+  _wiTicker = null;
+  _wiResponder = null;
+  _fDrawer = null;
+  _fTicker = null;
+  _isStatusBarVisible = null;
+}
+
+export function D_ShutdownDoomLoop() {
+  D_DoomRafLoop.close();
+  D_ClearLoopReferences();
+}
+
 async function D_DoomLoop() {
+  const loopToken = D_DoomRafLoop.begin();
+  if (loopToken === null) {
+    D_ClearLoopReferences();
+    return;
+  }
+  _lastTime = 0;
+  _ticAccum = 0;
   _pTicker = (await import('./p_tick.js')).P_Ticker;
   _updateSprites = (await import('./r_things.js')).R_UpdateSprites;
   _drawPlayerSprites = (await import('./r_psprite.js')).R_DrawPlayerSprites;
@@ -324,7 +375,13 @@ async function D_DoomLoop() {
   const finale = await import('./f_finale.js');
   _fDrawer = finale.F_Drawer;
   _fTicker = finale.F_Ticker;
+  // Shutdown may have happened while the dynamic imports above were pending.
+  if (D_DoomRafLoop.active(loopToken) !== true) {
+    D_ClearLoopReferences();
+    return;
+  }
   function frame(now) {
+    if (D_DoomRafLoop.active(loopToken) !== true) return;
     if (_lastTime === 0) _lastTime = now;
     const dt = (now - _lastTime) / 1000;
     _lastTime = now;
@@ -393,11 +450,14 @@ async function D_DoomLoop() {
         D_KeyboardInput.buildFinaleCmd(players[consoleplayer]);
         _fTicker();
       }
+      // I_Quit can synchronously dispatch doom:quit from inside a ticker.
+      if (D_DoomRafLoop.active(loopToken) !== true) return;
     }
+    if (D_DoomRafLoop.active(loopToken) !== true) return;
     D_Display();
-    requestAnimationFrame(frame);
+    D_DoomRafLoop.schedule(loopToken, frame);
   }
-  requestAnimationFrame(frame);
+  D_DoomRafLoop.schedule(loopToken, frame);
 }
 
 // ---------- IWAD detection ----------
@@ -700,6 +760,11 @@ export async function D_DoomMain() {
   if (W_CheckNumForName('F_SKY1') !== -1) {
     (await import('./doomstat.js')).set_skyflatnum(R_FlatNumForName('F_SKY1'));
   }
+
+  // A graphics shutdown is terminal for this page. It may have happened at
+  // any awaited import above; do not install new handlers, build a level, or
+  // restart RAF against the disposed renderer.
+  if (D_DoomRafLoop.isClosed() === true) return;
 
   // Install keyboard listeners early so the title-screen menu (Escape /
   // arrows / Enter) works before any level is loaded.

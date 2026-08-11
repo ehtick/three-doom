@@ -12,6 +12,10 @@ import { skyflatnum } from './doomstat.js';
 // sector → [{bucket, kind, startVertex, vertexCount}] for the by-sector updaters.
 const _sectorContribs = new Map();
 
+export function R_ShutdownPlanes() {
+  _sectorContribs.clear();
+}
+
 // Sutherland–Hodgman clip by a node's partition half-plane (f<0 = side 0, right).
 function clipPolyByHalfplane(poly, nx, ny, dx, dy, keepNeg) {
   const out = [];

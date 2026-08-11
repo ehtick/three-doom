@@ -16,6 +16,7 @@ import { SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
 
 // Cache source indices, while each canvas lazily follows the active PLAYPAL.
 const _cache = new Map();
+export function R_ShutdownPlayerSprites() { _cache.clear(); }
 function decodeAsCanvas(lumpIdx) {
   let entry = _cache.get(lumpIdx);
   if (entry !== undefined) return entry;

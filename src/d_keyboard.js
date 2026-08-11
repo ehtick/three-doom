@@ -4,7 +4,7 @@
 // We expose a `buildCmd(player)` function called from D_DoomLoop's tic step,
 // so cmd is written exactly once per tic (in sync with P_PlayerThink).
 
-import { renderer } from './i_video.js';
+import { renderer, I_RegisterGraphicsShutdownHook } from './i_video.js';
 import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT } from './d_event.js';
 import { D_ComputeMovement, D_MouseStrafePressed } from './d_input_logic.js';
 
@@ -34,10 +34,13 @@ let dclicktime2 = 0;
 let sendpause = false;
 
 let _listenersInstalled = false;
-function installListeners() {
-  if (_listenersInstalled) return;
-  _listenersInstalled = true;
-  document.addEventListener('keydown', async (e) => {
+let _unregisterShutdownHook = null;
+let _listenerGeneration = 0;
+function listenerIsActive(generation) {
+  return _listenersInstalled === true && generation === _listenerGeneration;
+}
+async function onKeyDown(e) {
+      const generation = _listenerGeneration;
       keys.add(e.code);
       // preventDefault must run SYNCHRONOUSLY during dispatch — call it before
       // any awaited dynamic imports below, otherwise the browser's default
@@ -49,6 +52,7 @@ function installListeners() {
         e.preventDefault?.();
       }
       const ds = await import('./doomstat.js');
+      if (listenerIsActive(generation) !== true) return;
       // KEY_PAUSE — toggle pause during live (non-demo) gameplay. Latch the
       // request; buildCmd encodes it into the next ticcmd and G_CheckSpecialButtons
       // performs the paused/music toggle. Ignored outside a level so it can't
@@ -83,6 +87,7 @@ function installListeners() {
         // rising-edge (attackdown/usedown) debounce.
         if (e.repeat !== true) {
           const wi = await import('./wi_stuff.js');
+          if (listenerIsActive(generation) !== true) return;
           wi.WI_Responder({ type: 0, data1: e.keyCode | 0 });
         }
         e.preventDefault?.();
@@ -94,6 +99,7 @@ function installListeners() {
       // still reach the menu, matching the global menu responder.
       if (ds.gamestate === 2 /*GS_FINALE*/ && ds.menuactive !== true) {
         const finale = await import('./f_finale.js');
+        if (listenerIsActive(generation) !== true) return;
         if (e.code !== 'Escape' && e.repeat !== true &&
             finale.F_Responder({ type: 0, data1: e.keyCode | 0 })) {
           e.preventDefault?.();
@@ -106,18 +112,27 @@ function installListeners() {
       }
       // Single-shot automap controls.
       if (e.code === 'Tab') {
-        (await import('./am_map.js')).AM_Toggle();
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Toggle();
       } else if (e.code === 'Equal' || e.code === 'NumpadAdd') {
-        (await import('./am_map.js')).AM_Responder({ type: 0, data1: 0x2b });
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: 0, data1: 0x2b });
       } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
-        (await import('./am_map.js')).AM_Responder({ type: 0, data1: 0x2d });
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: 0, data1: 0x2d });
       } else if (e.code === 'KeyF') {
-        (await import('./am_map.js')).AM_Responder({ type: 0, data1: 0x66 });
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: 0, data1: 0x66 });
       }
       // Menu — Esc opens/closes; while menu is open or a modal is up, route
       // arrows / Enter / Backspace / y / n through M_Responder.
-      else if (e.code === 'Escape' || (await import('./doomstat.js')).menuactive) {
+      else if (e.code === 'Escape' || ds.menuactive) {
         const m = await import('./m_menu.js');
+        if (listenerIsActive(generation) !== true) return;
         const codeToKey = {
           Escape: 27, Enter: 13, NumpadEnter: 13, Backspace: 127 /*KEY_BACKSPACE*/,
           ArrowUp: 0xad, ArrowDown: 0xaf, ArrowLeft: 0xac, ArrowRight: 0xae,
@@ -132,7 +147,9 @@ function installListeners() {
       // Cheat sequencer — feed each lowercase letter through the table.
       else if (e.code.startsWith('Key')) {
         const ch = e.code.charAt(3).toLowerCase().charCodeAt(0);
-        await import('./m_cheat.js').then(m => m.cht_HandleKey(ch));
+        const cheat = await import('./m_cheat.js');
+        if (listenerIsActive(generation) !== true) return;
+        cheat.cht_HandleKey(ch);
       }
       // Weapon digits are sampled into BT_CHANGE by buildCmd, so recordings
       // carry the switch in the ticcmd instead of mutating pendingweapon here.
@@ -140,15 +157,21 @@ function installListeners() {
         // Vanilla ST_Responder feeds every key (digits included) to the cheat
         // sequencer; without this IDMUS could never collect its 2-digit param.
         const digCh = e.code.slice(5).charCodeAt(0); // '0'..'9'
-        await import('./m_cheat.js').then(m => m.cht_HandleKey(digCh));
+        const cheat = await import('./m_cheat.js');
+        if (listenerIsActive(generation) !== true) return;
+        cheat.cht_HandleKey(digCh);
       }
-    });
-  document.addEventListener('keyup', (e) => { keys.delete(e.code); });
-  document.addEventListener('mousedown', async (e) => {
+}
+
+function onKeyUp(e) { keys.delete(e.code); }
+
+async function onMouseDown(e) {
+    const generation = _listenerGeneration;
     mouseButtons |= (1 << e.button);
     // Recapture pointer lock only during interactive play. Demo playback
     // shouldn't grab the cursor — the user might want to click out.
     const ds = await import('./doomstat.js');
+    if (listenerIsActive(generation) !== true) return;
     if (ds.gamestate === 2 /*GS_FINALE*/) {
       // Mouse attack remains visible to the per-tic finale command sampler;
       // cast death input is keyboard-only in f_finale.c.
@@ -156,28 +179,71 @@ function installListeners() {
       return;
     }
     if (ds.gamestate === 0 /*GS_LEVEL*/ && !ds.demoplayback &&
-        document.pointerLockElement !== renderer.domElement) {
+        renderer !== null && document.pointerLockElement !== renderer.domElement) {
       renderer.domElement.requestPointerLock?.();
     }
-  });
-  document.addEventListener('mouseup', (e) => { mouseButtons &= ~(1 << e.button); });
-  document.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement === renderer.domElement) {
+}
+
+function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
+
+function onMouseMove(e) {
+    if (renderer !== null && document.pointerLockElement === renderer.domElement) {
       mouseDX += e.movementX;
       mouseDY -= e.movementY;
     }
-  });
+}
+
+function installListeners() {
+  if (_listenersInstalled) return;
+  _listenersInstalled = true;
+  _listenerGeneration++;
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
+  document.addEventListener('mousedown', onMouseDown);
+  document.addEventListener('mouseup', onMouseUp);
+  document.addEventListener('mousemove', onMouseMove);
+  _unregisterShutdownHook = I_RegisterGraphicsShutdownHook(shutdownListeners);
+}
+
+function shutdownListeners() {
+  _listenerGeneration++;
+  if (_listenersInstalled === true) {
+    document.removeEventListener('keydown', onKeyDown);
+    document.removeEventListener('keyup', onKeyUp);
+    document.removeEventListener('mousedown', onMouseDown);
+    document.removeEventListener('mouseup', onMouseUp);
+    document.removeEventListener('mousemove', onMouseMove);
+    _listenersInstalled = false;
+  }
+  if (_unregisterShutdownHook !== null) {
+    const unregister = _unregisterShutdownHook;
+    _unregisterShutdownHook = null;
+    unregister();
+  }
+  keys.clear();
+  mouseDX = 0;
+  mouseDY = 0;
+  mouseButtons = 0;
+  turnheld = 0;
+  dclicks = 0;
+  dclickstate = 0;
+  dclicktime = 0;
+  dclicks2 = 0;
+  dclickstate2 = 0;
+  dclicktime2 = 0;
+  sendpause = false;
 }
 
 // Called when a level starts — captures the mouse for look-around. Falls back
 // silently if the browser refuses (e.g. requires a user gesture in some flows).
 export function D_AcquirePointerLock() {
-  try { renderer.domElement.requestPointerLock?.(); } catch { /* ignore */ }
+  try { renderer?.domElement.requestPointerLock?.(); } catch { /* ignore */ }
 }
 
 export const D_KeyboardInput = {
   init(_player) { installListeners(); },
   installEarly() { installListeners(); },
+  shutdown() { shutdownListeners(); },
 
   // Finale F_Ticker reads player.cmd.buttons exactly like linuxdoom. Movement
   // is irrelevant here, so sample only the controls that can set ticcmd bits.

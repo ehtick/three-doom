@@ -88,6 +88,17 @@ export function R_SetPaletteIndex(index) {
 export function R_GetPaletteTexture()  { return _paletteTex; }
 export function R_GetColormapTexture() { return _colormapTex; }
 
+export function R_ShutdownShader() {
+  if (_paletteTex !== null) _paletteTex.dispose();
+  if (_colormapTex !== null) _colormapTex.dispose();
+  _paletteTex = null;
+  _colormapTex = null;
+  _playpalRGBA = null;
+  _paletteIndex = 0;
+  extralightUniform.value = 0;
+  fixedColormapUniform.value = -1;
+}
+
 // Build the (R8 index, R8 alpha) data texture from a Uint8Array of palette
 // indices and a matching Uint8Array of alphas (0 = transparent, 255 = opaque).
 // Returns a THREE.DataTexture using RG8 storage so the shader can sample

@@ -34,6 +34,11 @@ function attachContrib(sectorRef, c) {
 // top/middle/bottom slot.
 const _switchWalls = new Map();
 
+export function R_ShutdownWalls() {
+  _wallContribs.clear();
+  _switchWalls.clear();
+}
+
 // Re-texture a switch wall in place after its sidedef texture number flips.
 // No-op if (line, slot) isn't a registered switch wall.
 export function R_SetSwitchTexture(line, slot, texnum) {

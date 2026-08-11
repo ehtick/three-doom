@@ -300,6 +300,30 @@ export function R_ClearMeshRegistry() {
   _meshesByTexnum.clear();
   _meshesByFlatnum.clear();
 }
+
+export function R_ShutdownData() {
+  for (const texture of _flatTextureCache.values()) texture.dispose();
+  for (const texture of _textureTextureCache.values()) texture.dispose();
+  _flatTextureCache.clear();
+  _textureTextureCache.clear();
+  R_ClearMeshRegistry();
+  _animatedTextures.length = 0;
+
+  firstflat = 0; lastflat = 0; numflats = 0;
+  firstpatch = 0; lastpatch = 0; numpatches = 0;
+  firstspritelump = 0; lastspritelump = 0; numspritelumps = 0;
+  numtextures = 0;
+  textures = null;
+  texturewidthmask = null;
+  textureheight = null;
+  texturetranslation = null;
+  flattranslation = null;
+  spritewidth = null;
+  spriteoffset = null;
+  spritetopoffset = null;
+  colormaps = null;
+  playpal_rgba = null;
+}
 export function R_RegisterFlatMesh(flatnum, mesh) {
   let s = _meshesByFlatnum.get(flatnum);
   if (s === undefined) { s = new Set(); _meshesByFlatnum.set(flatnum, s); }

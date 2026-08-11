@@ -644,11 +644,41 @@ function WI_loadData() {
   par = V_DecodePatchToCanvas('WIPAR');
 }
 
-// Decoded patches live in v_video's persistent cache; nothing to free here (JS
-// GC replaces the zone allocator). Drop our references so a later intermission
-// re-resolves cleanly.
+// Decoded patches live in v_video's central cache, but the intermission also
+// keeps direct references. Drop those references so shutdown can release every
+// backing canvas and a later intermission re-resolves cleanly.
 function WI_unloadData() {
-  // intentionally empty — see note above.
+  bg = null;
+  yah.fill(null);
+  splat = null;
+  percent = null;
+  colon = null;
+  wiminus = null;
+  num.fill(null);
+  finished = null;
+  entering = null;
+  sp_secret = null;
+  kills = null;
+  items = null;
+  time = null;
+  par = null;
+  sucks = null;
+  lnames = [];
+  _splatArr[0] = null;
+  for (const episode of anims) {
+    for (const animation of episode) animation.p.fill(null);
+  }
+  _ctx = null;
+  _ox = 0;
+  _oy = 0;
+  _sx = 1;
+  _sy = 1;
+}
+
+export function WI_Shutdown() {
+  _active = false;
+  _onDone = null;
+  WI_unloadData();
 }
 
 export function WI_Drawer(ctx, dx, dy, dw, dh) {

@@ -7,11 +7,11 @@ import * as THREE from 'three';
 import { camera, scene, renderer } from './i_video.js';
 import { players, consoleplayer, viewangleoffset } from './doomstat.js';
 import { ANG90 } from './tables.js';
-import { R_BuildWalls } from './r_segs.js';
-import { R_BuildPlanes } from './r_plane.js';
-import { R_BuildSpriteBillboards, R_ClearSpriteCache, set_view as set_thing_view } from './r_things.js';
+import { R_BuildWalls, R_ShutdownWalls } from './r_segs.js';
+import { R_BuildPlanes, R_ShutdownPlanes } from './r_plane.js';
+import { R_BuildSpriteBillboards, R_ShutdownThings, set_view as set_thing_view } from './r_things.js';
 import { R_ClearMeshRegistry } from './r_data.js';
-import { R_BuildSky, R_UpdateSky } from './r_sky.js';
+import { R_BuildSky, R_UpdateSky, R_ShutdownSky } from './r_sky.js';
 import { R_PointInSubsector } from './r_bsp.js';
 import { R_SetViewLighting } from './r_shader.js';
 import { segs } from './p_setup.js';
@@ -19,25 +19,53 @@ import { ML_MAPPED } from './doomdata.js';
 
 let _levelRoot = null;
 
+function disposeLevelRoot() {
+  if (_levelRoot === null) {
+    R_ShutdownSky();
+    R_ShutdownThings();
+    R_ShutdownWalls();
+    R_ShutdownPlanes();
+    R_ClearMeshRegistry();
+    return 0;
+  }
+  const skyMaterial = R_ShutdownSky();
+  if (scene !== null) scene.remove(_levelRoot);
+  const disposedGeometries = new Set();
+  const disposedMaterials = new Set();
+  if (skyMaterial !== null) disposedMaterials.add(skyMaterial);
+  _levelRoot.traverse((o) => {
+    if (o.geometry !== undefined && o.geometry !== null &&
+        disposedGeometries.has(o.geometry) === false) {
+      o.geometry.dispose();
+      disposedGeometries.add(o.geometry);
+    }
+    if (o.material !== undefined && o.material !== null) {
+      const materials = Array.isArray(o.material) ? o.material : [o.material];
+      for (const material of materials) {
+        if (disposedMaterials.has(material) === false) {
+          material.dispose();
+          disposedMaterials.add(material);
+        }
+      }
+    }
+  });
+  _levelRoot.clear();
+  _levelRoot = null;
+  R_ShutdownThings();
+  R_ShutdownWalls();
+  R_ShutdownPlanes();
+  R_ClearMeshRegistry();
+  return disposedGeometries.size;
+}
+
+export function R_Shutdown() {
+  return disposeLevelRoot();
+}
+
 // Called by g_game.js after P_SetupLevel.
 export function R_NewMap() {
   if (_levelRoot !== null) {
-    scene.remove(_levelRoot);
-    _levelRoot.traverse((o) => {
-      if (o.geometry !== undefined && o.geometry !== null) o.geometry.dispose();
-      if (o.material !== undefined && o.material !== null) {
-        // Skip o.material.map.dispose(): wall textures are shared via
-        // r_data.js's composite cache and sprite textures via the sprite cache.
-        // The cache owns the lifetime; disposing here would dangling-reference.
-        o.material.dispose();
-      }
-    });
-    // Sprite textures are cached per-lump in r_things.js. Clear so the next map
-    // rebuilds them (they're keyed on lump index which spans the whole WAD).
-    R_ClearSpriteCache();
-    // Drop the animated-texture mesh registry — it referenced the meshes we
-    // just disposed; r_segs/r_plane re-register fresh meshes for the new map.
-    R_ClearMeshRegistry();
+    disposeLevelRoot();
   }
   _levelRoot = new THREE.Group();
   _levelRoot.name = 'level';

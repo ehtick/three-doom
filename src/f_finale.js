@@ -105,6 +105,19 @@ export function F_Ticker() {
 }
 
 const _flatCanvasCache = new Map();
+
+export function F_Shutdown() {
+  _flatCanvasCache.clear();
+  _stage = 0;
+  _finalecount = 0;
+  _active = false;
+  _done = null;
+  _finaleText = '';
+  _finaleFlat = '';
+  _commercial = false;
+  _cast = null;
+  _castActive = false;
+}
 function getFlatCanvas(name) {
   if (_flatCanvasCache.has(name)) return _flatCanvasCache.get(name);
   if (typeof document === 'undefined') return null;

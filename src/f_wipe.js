@@ -85,3 +85,12 @@ export function wipe_Draw(ctx, dstX, dstY, dstW, dstH) {
 }
 
 export function wipe_isActive() { return _active; }
+
+export function wipe_Shutdown() {
+  if (_startCanvas !== null) { _startCanvas.width = 0; _startCanvas.height = 0; }
+  if (_endCanvas !== null) { _endCanvas.width = 0; _endCanvas.height = 0; }
+  _startCanvas = null;
+  _endCanvas = null;
+  _y = null;
+  _active = false;
+}

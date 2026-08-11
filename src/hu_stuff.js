@@ -85,6 +85,15 @@ let _lastMo       = null;
 
 export function HU_Init() { /* fonts loaded lazily on first draw */ }
 
+export function HU_Shutdown() {
+  hu_font.fill(null);
+  _fontLoaded = false;
+  _msgText = '';
+  _msgCounter = 0;
+  _titleCounter = 0;
+  _lastMo = null;
+}
+
 export function HU_Start() {
   _msgText = ''; _msgCounter = 0;
   _titleCounter = 5 * 35; // show title for 5 seconds

@@ -39,6 +39,20 @@ let _cachedFov    = -1;
 let _cachedAspect = -1;
 let _hfovHalfTan  = 1;
 
+export function R_ShutdownSky() {
+  const disposedMaterial = _skyMat;
+  if (_skyMat !== null) _skyMat.dispose();
+  if (_skyMap !== null) _skyMap.dispose();
+  _skyMat = null;
+  _skyMap = null;
+  _cachedFov = -1;
+  _cachedAspect = -1;
+  _hfovHalfTan = 1;
+  skytexture = -1;
+  skytexturemid = 0;
+  return disposedMaterial;
+}
+
 // Mirrors g_game.c:454-468.
 export function R_InitSkyMap() {
   let name;
