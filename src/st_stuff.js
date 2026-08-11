@@ -9,6 +9,9 @@ import { V_PaletteCSS } from './v_palette.js';
 import { M_Random } from './m_random.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
+import {
+  ST_ARMORX, ST_BIG_NUMBER_Y, ST_HEALTHX, ST_PERCENT_PATCH,
+} from './st_status_logic.js';
 
 // Patches are decoded + cached centrally in v_video.js (V_DecodePatchToCanvas).
 const getPatch    = V_DecodePatchToCanvas;
@@ -311,8 +314,15 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   // 2) AMMO — right-aligned at x=44 (3-digit width).
   const ammoIdx = weaponAmmoIndex(p.readyweapon);
   if (ammoIdx >= 0) drawNumber(overlayCtx, p.ammo[ammoIdx], dstX + 44 * sx, barY + 3 * sy, sx, sy, 'STTNUM');
-  // 3) HEALTH — right-aligned at x=90.
-  drawNumber(overlayCtx, p.health, dstX + 90 * sx, barY + 3 * sy, sx, sy, 'STTNUM');
+  // 3) HEALTH — STlib_updatePercent draws STTPRCNT at the number's right edge,
+  // then right-aligns the three-digit value immediately to its left.
+  const percent = getPatch(ST_PERCENT_PATCH);
+  if (percent !== null) {
+    drawPatchAt(overlayCtx, percent,
+      dstX + ST_HEALTHX * sx, dstY + ST_BIG_NUMBER_Y * sy, sx, sy);
+  }
+  drawNumber(overlayCtx, p.health, dstX + ST_HEALTHX * sx,
+    dstY + ST_BIG_NUMBER_Y * sy, sx, sy, 'STTNUM');
   // 4) STARMS widget — slots 2..7 = pistol..bfg.
   const starms = getPatch('STARMS');
   if (starms !== null) {
@@ -332,8 +342,13 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     const fy = dstY + (168 - face.topoffset)  * sy;
     overlayCtx.drawImage(face.canvas, fx, fy, face.w * sx, face.h * sy);
   }
-  // 6) ARMOR — right-aligned at x=221.
-  drawNumber(overlayCtx, p.armorpoints, dstX + 221 * sx, barY + 3 * sy, sx, sy, 'STTNUM');
+  // 6) ARMOR — the same percent widget at the source x/y.
+  if (percent !== null) {
+    drawPatchAt(overlayCtx, percent,
+      dstX + ST_ARMORX * sx, dstY + ST_BIG_NUMBER_Y * sy, sx, sy);
+  }
+  drawNumber(overlayCtx, p.armorpoints, dstX + ST_ARMORX * sx,
+    dstY + ST_BIG_NUMBER_Y * sy, sx, sy, 'STTNUM');
   // 7) Keys — three slots stacked, with skull variants overriding keycards.
   for (let i = 0; i < 3; i++) {
     const hasKey  = p.cards && p.cards[i] === true;
