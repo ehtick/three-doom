@@ -1,6 +1,8 @@
 import { GameMode_t } from '../src/doomdef.js';
 import { C1TEXT, C4TEXT, C5TEXT, C6TEXT, E1TEXT, E4TEXT } from '../src/d_englsh.js';
-import { F_GetFinaleSpec, F_ShouldStartCommercialFinale } from '../src/f_finale_logic.js';
+import {
+  F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldStartCommercialFinale,
+} from '../src/f_finale_logic.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -40,4 +42,13 @@ Deno.test('commercial finale breakpoints match G_WorldDone', () => {
   assertEquals(F_ShouldStartCommercialFinale(GameMode_t.commercial, 31, false), false, 'normal MAP31 exit');
   assertEquals(F_ShouldStartCommercialFinale(GameMode_t.commercial, 31, true), true, 'secret MAP31 exit');
   assertEquals(F_ShouldStartCommercialFinale(GameMode_t.registered, 6, false), false, 'Doom 1 map');
+});
+
+Deno.test('Doom 1 ending art follows game mode and episode', () => {
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.shareware, 1), 'HELP2', 'shareware E1');
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.registered, 1), 'HELP2', 'registered E1');
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 1), 'CREDIT', 'retail E1');
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 2), 'VICTORY2', 'E2');
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 3), null, 'E3 bunny');
+  assertEquals(F_GetDoom1ArtPatch(GameMode_t.retail, 4), 'ENDPIC', 'E4');
 });

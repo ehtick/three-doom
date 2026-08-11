@@ -15,7 +15,7 @@ import { S_ChangeMusic, S_StartMusic } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
 import { W_CacheLumpNum, W_CheckNumForName } from './w_wad.js';
 import { playpal_rgba } from './r_data.js';
-import { F_GetFinaleSpec } from './f_finale_logic.js';
+import { F_GetDoom1ArtPatch, F_GetFinaleSpec } from './f_finale_logic.js';
 
 // State machine: 0 = typing text, 1 = post-text still / bunny scroll.
 let _stage = 0;
@@ -184,10 +184,8 @@ export function F_Drawer(ctx, dx, dy, dw, dh) {
   const sx = dw / 320, sy = dh / 200;
   ctx.fillStyle = '#000';
   ctx.fillRect(dx, dy, dw, dh);
-  let pic = null;
-  if (gameepisode === 1) pic = getPatch('HELP2') || getPatch('CREDIT');
-  else if (gameepisode === 2) pic = getPatch('VICTORY2');
-  else if (gameepisode === 4) pic = getPatch('ENDPIC');
+  const patchName = F_GetDoom1ArtPatch(gamemode, gameepisode);
+  const pic = patchName === null ? null : getPatch(patchName);
   if (pic !== null) ctx.drawImage(pic.canvas, dx, dy, pic.w * sx, pic.h * sy);
 }
 

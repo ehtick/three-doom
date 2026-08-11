@@ -41,3 +41,12 @@ export function F_ShouldStartCommercialFinale(mode, map, secretExit) {
   if (map === 6 || map === 11 || map === 20 || map === 30) return true;
   return secretExit === true && (map === 15 || map === 31);
 }
+
+// f_finale.c:F_ArtScreenDrawer — Ultimate Doom replaces E1's HELP2 page with
+// CREDIT; registered/shareware keep HELP2. E3 is handled by the bunny scroll.
+export function F_GetDoom1ArtPatch(mode, episode) {
+  if (episode === 1) return mode === GameMode_t.retail ? 'CREDIT' : 'HELP2';
+  if (episode === 2) return 'VICTORY2';
+  if (episode === 4) return 'ENDPIC';
+  return null;
+}
