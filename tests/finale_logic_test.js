@@ -5,6 +5,8 @@ import {
   F_ShouldStartCommercialFinale, F_UpdateBunnyStage,
 } from '../src/f_finale_logic.js';
 
+const finaleSource = await Deno.readTextFile(new URL('../src/f_finale.js', import.meta.url));
+
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
     throw new Error(`${message}: expected ${String(expected)}, got ${String(actual)}`);
@@ -67,6 +69,22 @@ Deno.test('commercial finale skipping polls held ticcmd buttons after 50 tics', 
   assertEquals(F_ShouldAdvanceCommercial(51, [0, 0, 0, 0]), false, 'movement/no buttons');
   assertEquals(F_ShouldAdvanceCommercial(51, [1, 0, 0, 0]), true, 'held attack');
   assertEquals(F_ShouldAdvanceCommercial(51, [0, 2, 0, 0]), true, 'held use from another player');
+});
+
+Deno.test('MAP30 held buttons restart the cast until released', () => {
+  const ticker = finaleSource.slice(
+    finaleSource.indexOf('export function F_Ticker()'),
+    finaleSource.indexOf('const _flatCanvasCache'),
+  );
+  if (!ticker.includes('if (_commercial) {') ||
+      ticker.includes('if (_commercial && !_castActive)')) {
+    throw new Error('commercial skip polling is incorrectly gated by cast activity');
+  }
+
+  assertEquals(F_ShouldAdvanceCommercial(51, [1, 0, 0, 0]), true, 'first held tic starts cast');
+  assertEquals(F_ShouldAdvanceCommercial(52, [1, 0, 0, 0]), true, 'next held tic restarts cast');
+  assertEquals(F_ShouldAdvanceCommercial(53, [0, 0, 0, 0]), false, 'release lets cast advance');
+  assertEquals(F_ShouldAdvanceCommercial(54, [1, 0, 0, 0]), true, 'new press restarts cast');
 });
 
 Deno.test('E3 bunny END stages fire one pistol sound per newly shown frame', () => {

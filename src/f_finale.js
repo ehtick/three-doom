@@ -82,7 +82,7 @@ export function F_Responder(ev) {
 
 export function F_Ticker() {
   if (_active === false) return;
-  if (_commercial && !_castActive) {
+  if (_commercial) {
     const buttons = players.map((player) => player?.cmd?.buttons ?? 0);
     if (F_ShouldAdvanceCommercial(_finalecount, buttons)) {
       if (gamemap === 30) F_StartCast();
