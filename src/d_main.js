@@ -477,9 +477,9 @@ export async function D_DoomMain() {
   const pMap = await import('./p_map.js');
   const pEnemyEarly = await import('./p_enemy.js');
   pp.P_PsprSetExternals({ S, di, PMap: pMap, PEnemy: pEnemyEarly });
-  // Wire p_user → p_inter, p_inter → S + PM, p_map → p_inter + thinkercap.
+  // Wire p_user → p_inter, p_inter → sound/mobj/psprite, p_map → p_inter + thinkercap.
   const pInter = await import('./p_inter.js');
-  pInter.P_InterSetExternals({ S, PM });
+  pInter.P_InterSetExternals({ S, PM, P_DropWeapon: pp.P_DropWeapon });
   pp.P_PsprSetMobj({ PMobj: PM, PInter: pInter });
   const pTick = await import('./p_tick.js');
   pMap.P_MapSetExternals({ PInter: pInter, PMobj: PM, thinkercap: pTick.thinkercap });

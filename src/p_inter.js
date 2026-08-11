@@ -17,11 +17,17 @@ import { P_Random } from './m_random.js';
 import {
   P_KeyStaysInWorld, P_WeaponAmmoClips, P_WeaponStaysInWorld,
 } from './p_pickup_logic.js';
+import { P_DropWeaponOnDeath } from './p_death_logic.js';
 
 // Externals (wired at init).
 let _S = null;
 let _PM = null;
-export function P_InterSetExternals(refs) { if (refs.S != null) _S = refs.S; if (refs.PM != null) _PM = refs.PM; }
+let _P_DropWeapon = null;
+export function P_InterSetExternals(refs) {
+  if (refs.S != null) _S = refs.S;
+  if (refs.PM != null) _PM = refs.PM;
+  if (refs.P_DropWeapon != null) _P_DropWeapon = refs.P_DropWeapon;
+}
 
 export function P_GiveBody(player, num) {
   if (player.health >= 100) return false;
@@ -250,7 +256,7 @@ export function P_TouchSpecialThing(special, toucher) {
 // P_KillMobj — transition target to its death state. p_inter.c:667
 import { mobjinfo, states } from './info.js';
 import { P_SetMobjState, MF_SHOOTABLE, MF_FLOAT, MF_SKULLFLY,
-         MF_NOGRAVITY, MF_CORPSE, MF_DROPOFF, MF_SOLID, MF_NOCLIP,
+         MF_NOGRAVITY, MF_CORPSE, MF_DROPOFF, MF_NOCLIP,
          MF_COUNTKILL, MF_JUSTHIT, ONFLOORZ } from './p_mobj.js';
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine, ANG180 } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
@@ -278,10 +284,7 @@ export function P_KillMobj(source, target) {
       const idx = _players.indexOf(target.player);
       if (idx >= 0) target.player.frags[idx]++;
     }
-    target.flags &= ~MF_SOLID;
-    target.player.playerstate = 1 /*PST_DEAD*/;
-    // P_DropWeapon — simplified: drop pending+ready to a "lower" state.
-    if (typeof globalThis.__P_DropWeapon === 'function') globalThis.__P_DropWeapon(target.player);
+    P_DropWeaponOnDeath(target, _P_DropWeapon);
   }
   if (target.info.xdeathstate !== 0 && target.health < -target.info.spawnhealth) {
     P_SetMobjState(target, target.info.xdeathstate);
