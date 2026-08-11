@@ -284,6 +284,20 @@ let _fDrawer = null;
 let _fTicker = null;
 let _isStatusBarVisible = null;
 
+// d_main.c builds the console command before TryRunTics enters G_Ticker.
+// Keep that command separate from player_t so a game action may rebuild the
+// player topology (and reset browser input state) without erasing this tic.
+const _localCommandPlayer = { cmd: doomstat.localcmds[0] };
+
+function D_CopyTiccmd(target, source) {
+  target.forwardmove = source.forwardmove;
+  target.sidemove = source.sidemove;
+  target.angleturn = source.angleturn;
+  target.consistancy = source.consistancy;
+  target.chatchar = source.chatchar;
+  target.buttons = source.buttons;
+}
+
 function D_ClearLoopReferences() {
   _lastTime = 0;
   _ticAccum = 0;
@@ -387,6 +401,12 @@ async function D_DoomLoop() {
     _ticAccum = clock.remainder;
     let dueTics = clock.due;
     while (dueTics-- > 0) {
+      // d_main.c:378-379 — sample the complete local command before
+      // D_DoAdvanceDemo, M_Ticker, and G_Ticker.  This also runs during demo
+      // playback: G_Ticker copies the live netcmd first and only then replaces
+      // it with G_ReadDemoTiccmd, so mouse axes and double-click state advance.
+      D_KeyboardInput.buildCmd(_localCommandPlayer);
+
       // d_main.c:380-383 order — D_DoAdvanceDemo runs BEFORE G_Ticker so cases
       // 1/3/5 (G_DeferedPlayDemo) queue gameaction=ga_playdemo and G_Ticker
       // dispatches it INSIDE the same tic. With the matching G_DoLoadLevel
@@ -397,23 +417,18 @@ async function D_DoomLoop() {
       if (_menuTicker !== null) _menuTicker();
       if (_gTicker !== null) _gTicker();
 
-      // g_game.c:654-710 — commands are populated for every game state after
-      // game actions settle and before the state-specific ticker runs. This
-      // keeps demos consuming commands through intermissions/finales and lets
-      // recorded attack/use buttons drive those screens.
+      // g_game.c:654-710 — after game actions settle, copy the already-built
+      // local command, then let demo playback overwrite it. Commands remain
+      // populated through intermissions/finales so those tickers see buttons.
       const activePlayers = G_CollectActivePlayers(players, doomstat.playeringame);
       if (activePlayers !== null) {
+        const localPlayer = players[consoleplayer];
+        if (doomstat.playeringame[consoleplayer] === true &&
+            localPlayer !== undefined && localPlayer !== null) {
+          D_CopyTiccmd(localPlayer.cmd, _localCommandPlayer.cmd);
+        }
         if (doomstat.demoplayback && _gReadDemoCmd !== null) {
           G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
-        } else {
-          const localPlayer = players[consoleplayer];
-          if (localPlayer !== undefined && localPlayer !== null) {
-            // d_net.c builds the complete console-player command before
-            // G_Ticker in every game state. Intermission ignores everything
-            // except attack/use; commercial finales intentionally accept any
-            // nonzero button byte, including weapon-change and Pause bits.
-            D_KeyboardInput.buildCmd(localPlayer);
-          }
         }
         if (_gCheckSpecial !== null) {
           for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
