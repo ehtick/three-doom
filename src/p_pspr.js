@@ -541,10 +541,14 @@ P_RegisterAction('A_CheckReload', (player) => {
   P_CheckAmmo(player);
 });
 
-// Super-shotgun (Doom 2) reload animation hooks — sound effects only here.
+// Super-shotgun (Doom 2) reload animation hooks.
 P_RegisterAction('A_OpenShotgun2',  (p) => { p = p.player ?? p; if (_S !== null) _S.S_StartSound(p.mo, 5 /*sfx_dbopn*/); });
 P_RegisterAction('A_LoadShotgun2',  (p) => { p = p.player ?? p; if (_S !== null) _S.S_StartSound(p.mo, 7 /*sfx_dbload*/); });
-P_RegisterAction('A_CloseShotgun2', (p) => { p = p.player ?? p; if (_S !== null) _S.S_StartSound(p.mo, 6 /*sfx_dbcls*/); });
+P_RegisterAction('A_CloseShotgun2', (p, psp) => {
+  p = p.player ?? p;
+  if (_S !== null) _S.S_StartSound(p.mo, 6 /*sfx_dbcls*/);
+  actionRegistry.A_ReFire(p, psp);
+});
 
 // ---------- P_BulletSlope / P_CalcSwing (ported from p_pspr.c) ----------
 // p_pspr.c P_BulletSlope. Autoaim sweep: straight, +5.6°, -5.6°.
