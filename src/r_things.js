@@ -18,6 +18,7 @@ import { patch_t } from './v_video.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { R_MakeIndexedTexture, R_MakeDoomSpriteMaterial } from './r_shader.js';
 import {
+  R_MobjHasWorldSprite,
   R_PlayerTranslationFromFlags,
   SPRITE_FF_FULLBRIGHT,
   SPRITE_MF_SHADOW,
@@ -207,6 +208,13 @@ const _liveSprites = []; // [{ sprite: THREE.Sprite, mobj: mobj_t }, ...]
 // sprites here directly; R_NewMap resets this each level.
 let _thingsGroup = null;
 
+function removeLiveSpriteAt(index) {
+  const sp = _liveSprites[index].sprite;
+  if (sp.parent !== null) sp.parent.remove(sp);
+  if (sp.material !== null) sp.material.dispose();
+  _liveSprites.splice(index, 1);
+}
+
 // View origin (in Doom fixed-point) — updated by R_SetupFrame.
 export let viewx = 0, viewy = 0;
 export function set_view(x, y) { viewx = x; viewy = y; }
@@ -219,10 +227,7 @@ export function set_view(x, y) { viewx = x; viewy = y; }
 export function R_RemoveMobjSprite(mobj) {
   for (let i = 0; i < _liveSprites.length; i++) {
     if (_liveSprites[i].mobj !== mobj) continue;
-    const sp = _liveSprites[i].sprite;
-    if (sp.parent !== null) sp.parent.remove(sp);
-    if (sp.material !== null) sp.material.dispose();
-    _liveSprites.splice(i, 1);
+    removeLiveSpriteAt(i);
     return;
   }
 }
@@ -232,6 +237,9 @@ export function R_RemoveMobjSprite(mobj) {
 // group. P_RemoveMobj's R_RemoveMobjSprite tears it back down. R_UpdateSprites
 // then refreshes texture/position from the mobj's current state each frame.
 export function R_RegisterMobjSprite(mobj) {
+  // Vanilla discovers sprites only through sector.thinglist. MF_NOSECTOR
+  // mobjs are thinkers but are intentionally absent from that list.
+  if (mobj === null || !R_MobjHasWorldSprite(mobj.flags)) return;
   if (_thingsGroup === null) return; // level not yet rendered (boot transient)
   // Bare sprite — texture/scale/position set on first R_UpdateSprites pass.
   // We use a placeholder material so the sprite is valid even before the
@@ -288,9 +296,17 @@ export function R_ApplySpritePatchGeometry(sprite, mobj, patch) {
 }
 
 export function R_UpdateSprites() {
-  for (const entry of _liveSprites) {
+  for (let i = 0; i < _liveSprites.length; i++) {
+    const entry = _liveSprites[i];
     const mo = entry.mobj;
     if (mo === null) continue;
+    // Flags can change after registration. Match removal from the sector list
+    // immediately rather than leaving a stale billboard alive indefinitely.
+    if (!R_MobjHasWorldSprite(mo.flags)) {
+      removeLiveSpriteAt(i);
+      i--;
+      continue;
+    }
     const isShadow = (mo.flags & SPRITE_MF_SHADOW) !== 0;
     const st = states[mo.state];
     if (st === undefined) continue;
@@ -413,7 +429,9 @@ export function R_BuildSpriteBillboards(scene) {
     const cap = globalThis.__doom_thinkercap;
     for (let cur = cap.next; cur !== cap; cur = cur.next) {
       const mo = cur.__mobj;
-      if (mo !== undefined && mo !== null) R_RegisterMobjSprite(mo);
+      if (mo !== undefined && mo !== null && R_MobjHasWorldSprite(mo.flags)) {
+        R_RegisterMobjSprite(mo);
+      }
     }
   }
   return _thingsGroup;

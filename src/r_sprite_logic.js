@@ -9,6 +9,7 @@ import {
 } from './r_light_logic.js';
 
 export const SPRITE_FF_FULLBRIGHT = 0x8000;
+export const SPRITE_MF_NOSECTOR = 0x8;
 export const SPRITE_MF_SHADOW = 0x40000;
 export const SPRITE_MF_TRANSLATION = 0x0c000000;
 export const SPRITE_MF_TRANSSHIFT = 26;
@@ -23,6 +24,13 @@ export const SPRITE_SHADOW_FLICKER = 0.09;
 // A negative result is the explicit shadow/fuzz path; non-negative results
 // are literal COLORMAP rows.
 export const PSPRITE_SHADOW_ROW = -1;
+
+// MF_NOSECTOR mobjs are deliberately absent from sector.thinglist. Vanilla's
+// R_AddSprites can therefore never discover them, even though they remain in
+// the thinker list (the MAP30 boss brain eye/targets are the stock examples).
+export function R_MobjHasWorldSprite(flags) {
+  return (flags & SPRITE_MF_NOSECTOR) === 0;
+}
 
 // r_things.c:R_DrawPlayerSprites blinks the weapon back to normal during the
 // final four seconds of partial invisibility. MF_SHADOW remains set for that

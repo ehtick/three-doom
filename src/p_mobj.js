@@ -240,7 +240,9 @@ export function P_SpawnMobj(x, y, z, type) {
   // an explicit hook because the JS port pre-creates THREE.Sprite billboards
   // and updates them in place. Without this, mid-game spawns (dropped clips,
   // projectiles, blood, puffs, gibs, teleport fog) would be invisible.
-  if (R_RegisterMobjSprite_external !== null) R_RegisterMobjSprite_external(mo);
+  if ((mo.flags & MF_NOSECTOR) === 0 && R_RegisterMobjSprite_external !== null) {
+    R_RegisterMobjSprite_external(mo);
+  }
   return mo;
 }
 
