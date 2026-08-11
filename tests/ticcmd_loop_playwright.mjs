@@ -120,7 +120,7 @@ try {
       cmd: {
         forwardmove: -7,
         sidemove: 9,
-        angleturn: 0x1200,
+        angleturn: 32760,
         consistancy: 0,
         chatchar: 0,
         buttons: 2,
@@ -138,9 +138,10 @@ try {
     key('keyup', 'KeyW', 'w');
     const recording = game.G_StopDemo();
     const recordedPayload = Array.from(recording.bytes.slice(13, -1));
+    const recordedRemoteAngle = doomstat.players[2].cmd.angleturn;
     keyboard.D_KeyboardInput.shutdown();
 
-    return { firstLevelCmd, afterDemoDrain, recordedPayload };
+    return { firstLevelCmd, afterDemoDrain, recordedPayload, recordedRemoteAngle };
   });
 
   const failures = [];
@@ -156,9 +157,12 @@ try {
       result.afterDemoDrain.buttons !== 0) {
     failures.push(`demo tic did not drain live input: ${JSON.stringify(result.afterDemoDrain)}`);
   }
-  const expectedPayload = [25, 0, 0, 0, 249, 9, 18, 2];
+  const expectedPayload = [25, 0, 0, 0, 249, 9, 128, 2];
   if (result.recordedPayload.join(',') !== expectedPayload.join(',')) {
     failures.push(`active-player recording order mismatch: ${JSON.stringify(result.recordedPayload)}`);
+  }
+  if (result.recordedRemoteAngle !== -32768) {
+    failures.push(`recorded command was not read back as a signed short: ${result.recordedRemoteAngle}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

@@ -24,6 +24,7 @@ import { S_PauseSound, S_ResumeSound } from './s_sound.js';
 import { F_StartFinale } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
 import { G_SecretExitAvailable } from './g_game_logic.js';
+import { G_DecodeDemoTiccmd, G_EncodeDemoTiccmd } from './g_demo.js';
 import { I_Error } from './i_system.js';
 import { W_CheckNumForName } from './w_wad.js';
 import {
@@ -410,10 +411,7 @@ export function G_DoPlayDemo() {
 export function G_ReadDemoTiccmd(cmd) {
   if (!doomstat.demoplayback || _demoBytes === null) return false;
   if (_demoBytes[_demoPos] === DEMOMARKER) { G_CheckDemoStatus(); return false; }
-  cmd.forwardmove = (_demoBytes[_demoPos++] << 24) >> 24;
-  cmd.sidemove    = (_demoBytes[_demoPos++] << 24) >> 24;
-  cmd.angleturn   = (_demoBytes[_demoPos++] & 0xff) << 8;
-  cmd.buttons     =  _demoBytes[_demoPos++] & 0xff;
+  _demoPos = G_DecodeDemoTiccmd(_demoBytes, _demoPos, cmd);
   return true;
 }
 
@@ -460,13 +458,13 @@ export function G_RecordDemo(name) {
 }
 export function G_WriteDemoTiccmd(cmd) {
   if (_recordBuf === null) return;
-  // g_game.c:1512 — angleturn is rounded to nearest 256 before packing:
-  // ((angleturn + 128) >> 8). The matching G_ReadDemoTiccmd left-shifts the
-  // stored byte back into the high bits (<<8), so without the +128 the
-  // playback angle is always biased one low-byte step below the recorded
-  // value, causing cumulative demo desync.
-  _recordBuf.push(cmd.forwardmove & 0xff, cmd.sidemove & 0xff,
-                  ((cmd.angleturn + 128) >> 8) & 0xff, cmd.buttons & 0xff);
+  // g_game.c:1506-1522 writes four bytes, rewinds demo_p, then reads those
+  // bytes back into the live command. Besides rounding angleturn to the
+  // nearest 256, that round-trip applies signed char/short narrowing before
+  // this same tic reaches P_Ticker.
+  const offset = _recordBuf.length;
+  _recordBuf.push(...G_EncodeDemoTiccmd(cmd));
+  G_DecodeDemoTiccmd(_recordBuf, offset, cmd);
 }
 export function G_StopDemo() {
   if (_recordBuf === null) return null;
