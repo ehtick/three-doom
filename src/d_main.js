@@ -599,7 +599,7 @@ export async function D_DoomMain() {
   RT.R_InitSprites();
   // Init sound + wire to p_mobj.
   const S = await import('./s_sound.js');
-  S.S_Init(8, 8);
+  S.S_Init(doomstat.snd_SfxVolume, doomstat.snd_MusicVolume);
   const PM = await import('./p_mobj.js');
   PM.P_MobjSetDoomstat(doomstat);
   PM.P_SetExternals({

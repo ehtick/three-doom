@@ -13,6 +13,11 @@ import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
   automapactive, players, consoleplayer,
   mouseSensitivity, set_mouseSensitivity,
+  snd_SfxVolume as sfxVolume, snd_MusicVolume as musicVolume,
+} from './doomstat.js';
+export {
+  snd_SfxVolume as sfxVolume,
+  snd_MusicVolume as musicVolume,
 } from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
   KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F11 } from './doomdef.js';
@@ -61,9 +66,6 @@ const SKULL_NAMES = ['M_SKULL1', 'M_SKULL2'];
 let _skullFrame   = 0;
 let _skullTicker  = 0;
 
-// Sound volumes (0..15).
-export let sfxVolume = 8;
-export let musicVolume = 8;
 let _detailLevel  = 0;  // 0=high, 1=low
 // _screenSize is the menu's view-size index (0..8 — slider position).
 // _screenblocks is the corresponding renderer "screen blocks" value (3..11)
@@ -187,14 +189,14 @@ const READ_MENU_2 = { name: 'Read This 2', x: 330, y: 175, fullscreen: 'HELP2', 
 // sound module. Keeping these setters exported also gives config/UI code one
 // path that cannot leave the displayed and effective volumes out of sync.
 export function M_SetSfxVolume(value) {
-  sfxVolume = Math.max(0, Math.min(15, value | 0));
-  S_ApplySfxVolume(sfxVolume);
-  return sfxVolume;
+  const volume = Math.max(0, Math.min(15, value | 0));
+  S_ApplySfxVolume(volume);
+  return volume;
 }
 export function M_SetMusicVolume(value) {
-  musicVolume = Math.max(0, Math.min(15, value | 0));
-  S_ApplyMusicVolume(musicVolume);
-  return musicVolume;
+  const volume = Math.max(0, Math.min(15, value | 0));
+  S_ApplyMusicVolume(volume);
+  return volume;
 }
 
 // ---------- Modal message prompt ----------

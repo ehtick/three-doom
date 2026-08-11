@@ -41,13 +41,20 @@ try {
   const initial = await first.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
     const video = await import('/src/v_video.js');
-    return { mouseSensitivity: doomstat.mouseSensitivity, usegamma: video.usegamma };
+    return {
+      mouseSensitivity: doomstat.mouseSensitivity,
+      sfxVolume: doomstat.snd_SfxVolume,
+      musicVolume: doomstat.snd_MusicVolume,
+      usegamma: video.usegamma,
+    };
   });
   const saved = await first.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
     const system = await import('/src/i_system.js');
     const video = await import('/src/v_video.js');
     doomstat.set_mouseSensitivity(8);
+    doomstat.set_snd_SfxVolume(12);
+    doomstat.set_snd_MusicVolume(3);
     video.set_usegamma(3);
     system.I_Quit();
     return localStorage.getItem('doom:defaults');
@@ -60,6 +67,8 @@ try {
     const video = await import('/src/v_video.js');
     const value = {
       mouseSensitivity: doomstat.mouseSensitivity,
+      sfxVolume: doomstat.snd_SfxVolume,
+      musicVolume: doomstat.snd_MusicVolume,
       usegamma: video.usegamma,
       defaults: localStorage.getItem('doom:defaults'),
     };
@@ -69,13 +78,16 @@ try {
   await second.close();
 
   const failures = [];
-  if (initial.mouseSensitivity !== 5 || initial.usegamma !== 0) {
+  if (initial.mouseSensitivity !== 5 || initial.sfxVolume !== 8 ||
+      initial.musicVolume !== 8 || initial.usegamma !== 0) {
     failures.push(`reference defaults mismatch: ${JSON.stringify(initial)}`);
   }
-  if (saved !== 'mouse_sensitivity\t\t8\nusegamma\t\t3') {
+  if (saved !== 'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nusegamma\t\t3') {
     failures.push(`quit save mismatch: ${JSON.stringify(saved)}`);
   }
-  if (reloaded.mouseSensitivity !== 8 || reloaded.usegamma !== 3 || reloaded.defaults !== saved) {
+  if (reloaded.mouseSensitivity !== 8 || reloaded.sfxVolume !== 12 ||
+      reloaded.musicVolume !== 3 || reloaded.usegamma !== 3 ||
+      reloaded.defaults !== saved) {
     failures.push(`reload mismatch: ${JSON.stringify(reloaded)}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);

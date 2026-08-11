@@ -10,7 +10,7 @@ function assertEquals(actual, expected, message) {
   }
 }
 
-Deno.test('mouse sensitivity and gamma round-trip through registered defaults', () => {
+Deno.test('input, sound, and gamma round-trip through registered defaults', () => {
   const oldStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   const values = new Map();
   Object.defineProperty(globalThis, 'localStorage', {
@@ -23,26 +23,36 @@ Deno.test('mouse sensitivity and gamma round-trip through registered defaults', 
   try {
     M_RegisterDoomDefaults();
     doomstat.set_mouseSensitivity(8);
+    doomstat.set_snd_SfxVolume(12);
+    doomstat.set_snd_MusicVolume(3);
     set_usegamma(3);
     M_SaveDefaults();
     assertEquals(
       values.get('doom:defaults'),
-      'mouse_sensitivity\t\t8\nusegamma\t\t3',
+      'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nusegamma\t\t3',
       'saved defaults',
     );
 
     doomstat.set_mouseSensitivity(1);
+    doomstat.set_snd_SfxVolume(1);
+    doomstat.set_snd_MusicVolume(1);
     set_usegamma(1);
     M_LoadDefaults();
     assertEquals(doomstat.mouseSensitivity, 8, 'loaded mouse sensitivity');
+    assertEquals(doomstat.snd_SfxVolume, 12, 'loaded sfx volume');
+    assertEquals(doomstat.snd_MusicVolume, 3, 'loaded music volume');
     assertEquals(usegamma, 3, 'loaded gamma');
 
     values.delete('doom:defaults');
     M_LoadDefaults();
     assertEquals(doomstat.mouseSensitivity, 5, 'reference mouse default');
+    assertEquals(doomstat.snd_SfxVolume, 8, 'reference sfx default');
+    assertEquals(doomstat.snd_MusicVolume, 8, 'reference music default');
     assertEquals(usegamma, 0, 'reference gamma default');
   } finally {
     doomstat.set_mouseSensitivity(5);
+    doomstat.set_snd_SfxVolume(8);
+    doomstat.set_snd_MusicVolume(8);
     set_usegamma(0);
     if (oldStorage === undefined) delete globalThis.localStorage;
     else Object.defineProperty(globalThis, 'localStorage', oldStorage);
@@ -71,16 +81,20 @@ Deno.test('I_Quit saves defaults before dispatching graphics shutdown', () => {
   try {
     M_RegisterDoomDefaults();
     doomstat.set_mouseSensitivity(7);
+    doomstat.set_snd_SfxVolume(11);
+    doomstat.set_snd_MusicVolume(4);
     set_usegamma(4);
     I_Quit();
     assertEquals(calls.join(','), 'save,quit', 'quit lifecycle order');
     assertEquals(
       values.get('doom:defaults'),
-      'mouse_sensitivity\t\t7\nusegamma\t\t4',
+      'mouse_sensitivity\t\t7\nsfx_volume\t\t11\nmusic_volume\t\t4\nusegamma\t\t4',
       'quit defaults',
     );
   } finally {
     doomstat.set_mouseSensitivity(5);
+    doomstat.set_snd_SfxVolume(8);
+    doomstat.set_snd_MusicVolume(8);
     set_usegamma(0);
     if (oldStorage === undefined) delete globalThis.localStorage;
     else Object.defineProperty(globalThis, 'localStorage', oldStorage);
@@ -96,6 +110,9 @@ Deno.test('startup registers defaults before loading and menu quit uses I_Quit',
   const load = boot.indexOf('M_LoadDefaults()');
   if (register < 0 || load <= register) {
     throw new Error('D_DoomMain does not register defaults before loading them');
+  }
+  if (!boot.includes('S.S_Init(doomstat.snd_SfxVolume, doomstat.snd_MusicVolume)')) {
+    throw new Error('sound startup ignores loaded volume defaults');
   }
 
   const menu = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
