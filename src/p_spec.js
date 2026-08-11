@@ -17,9 +17,10 @@ import { EV_DoCeiling, EV_CeilingCrushStop,
 import { EV_Teleport } from './p_telept.js';
 import { EV_LightTurnOn, EV_StartLightStrobing, EV_TurnTagLightsOff } from './p_lights.js';
 
-import { sectors, numsectors, lines, numlines } from './p_setup.js';
+import { sectors, numsectors, lines, numlines, sides } from './p_setup.js';
 import { P_Random } from './m_random.js';
 import * as doomstat from './doomstat.js';
+import { P_AdvanceScrollTextureOffset } from './p_spec_logic.js';
 
 export function P_InitPicAnims() {
   // Real animdef list lives in r_data.js as R_InitDefaultAnims().
@@ -29,9 +30,13 @@ export function P_InitPicAnims() {
 // etc.) and initialise switches/buttons.
 let _PLights = null;
 let _RAnimateTextures = null;
+let _RUpdateLineTextureOffset = null;
 export function P_SpecSetExternals(refs) {
   if (refs.PLights != null) _PLights = refs.PLights;
   if (refs.R_AnimateTextures != null) _RAnimateTextures = refs.R_AnimateTextures;
+  if (refs.R_UpdateLineTextureOffset != null) {
+    _RUpdateLineTextureOffset = refs.R_UpdateLineTextureOffset;
+  }
 }
 
 export function P_SpawnSpecials() {
@@ -61,15 +66,31 @@ export function P_SpawnSpecials() {
       default: break;
     }
   }
+
+  // p_spec.c:1336-1346 — cache every scrolling-wall effect for the per-tic
+  // update. The stock maps stay below vanilla's MAXLINEANIMS capacity.
+  _scrollLines.length = 0;
+  for (let i = 0; i < numlines; i++) {
+    if (lines[i].special === 48) _scrollLines.push(lines[i]);
+  }
 }
 
 // Per-tic update — drive switch button countdowns.
 let _PSwitch = null;
+const _scrollLines = [];
 export function P_SpecSetSwitch(refs) { if (refs.PSwitch != null) _PSwitch = refs.PSwitch; }
 export function P_UpdateSpecials() {
   // p_spec.c:1099-1108 — animation translation is selected inside
   // P_UpdateSpecials, before P_Ticker increments leveltime.
   if (_RAnimateTextures !== null) _RAnimateTextures(doomstat.leveltime);
+  // p_spec.c:1113-1123 — line special 48 scrolls side 0 by one fixed-point
+  // texture column. Update the baked Three.js UVs after changing the sidedef.
+  for (const line of _scrollLines) {
+    const side = sides[line.sidenum[0]];
+    if (side === undefined) continue;
+    side.textureoffset = P_AdvanceScrollTextureOffset(side.textureoffset);
+    if (_RUpdateLineTextureOffset !== null) _RUpdateLineTextureOffset(line);
+  }
   if (_PSwitch !== null && typeof _PSwitch.P_UpdateButtons === 'function') _PSwitch.P_UpdateButtons();
 }
 

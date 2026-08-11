@@ -33,10 +33,14 @@ function attachContrib(sectorRef, c) {
 // disturbing its neighbours. Map<line, { [slot]: bucket }>, keyed by p_switch's
 // top/middle/bottom slot.
 const _switchWalls = new Map();
+// Per-line quad slices for special 48. Wall UVs are baked into shared
+// BufferGeometry, so the affected vertices must be rewritten in place.
+const _scrollWalls = new Map();
 
 export function R_ShutdownWalls() {
   _wallContribs.clear();
   _switchWalls.clear();
+  _scrollWalls.clear();
 }
 
 // Re-texture a switch wall in place after its sidedef texture number flips.
@@ -50,6 +54,24 @@ export function R_SetSwitchTexture(line, slot, texnum) {
   if (tex === null) return;
   b.mesh.material.uniforms.map.value = tex;
   b.texnum = texnum;
+}
+
+export function R_UpdateLineTextureOffset(line) {
+  const contributions = _scrollWalls.get(line);
+  if (contributions === undefined) return;
+  const side = sides[line.sidenum[0]];
+  if (side === undefined) return;
+  for (const c of contributions) {
+    if (c.bucket.mesh === undefined) continue;
+    const u0 = (side.textureoffset / 65536) / c.texWidth;
+    const u1 = ((side.textureoffset / 65536) + c.length) / c.texWidth;
+    const uv = c.bucket.mesh.geometry.attributes.uv;
+    uv.setX(c.baseIdx + 0, u0);
+    uv.setX(c.baseIdx + 1, u1);
+    uv.setX(c.baseIdx + 2, u1);
+    uv.setX(c.baseIdx + 3, u0);
+    uv.needsUpdate = true;
+  }
 }
 
 // Compute (vTop, vBottom) for a quad given its texture anchor in world Y.
@@ -183,6 +205,7 @@ export function R_UpdateSectorWallLight(sector) {
 export function R_BuildWalls(scene) {
   _wallContribs.clear();
   _switchWalls.clear();
+  _scrollWalls.clear();
   let switchSeq = 0; // unique-bucket counter for private switch-wall meshes
   const opaqueBuckets = new Map(); // bucket key -> bucket
   const maskedBuckets = new Map(); // bucket key -> bucket
@@ -236,6 +259,14 @@ export function R_BuildWalls(scene) {
       b.indices.push(baseIdx, baseIdx + 1, baseIdx + 2, baseIdx, baseIdx + 2, baseIdx + 3);
     } else {
       b.indices.push(baseIdx, baseIdx + 2, baseIdx + 1, baseIdx, baseIdx + 3, baseIdx + 2);
+    }
+    if (frontFacing === true && switchLine?.special === 48) {
+      let contributions = _scrollWalls.get(switchLine);
+      if (contributions === undefined) {
+        contributions = [];
+        _scrollWalls.set(switchLine, contributions);
+      }
+      contributions.push({ bucket: b, baseIdx, length, texWidth: tex.width });
     }
     return { bucket: b, baseIdx };
   }

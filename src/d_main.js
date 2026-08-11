@@ -613,7 +613,11 @@ export async function D_DoomMain() {
     doomstat.gamemode === GameMode_t.commercial ? 3
     : (doomstat.gamemode === GameMode_t.registered ||
        doomstat.gamemode === GameMode_t.retail) ? 2 : 1);
-  pSpec.P_SpecSetExternals({ PLights: pLights, R_AnimateTextures });
+  pSpec.P_SpecSetExternals({
+    PLights: pLights,
+    R_AnimateTextures,
+    R_UpdateLineTextureOffset: rSegs.R_UpdateLineTextureOffset,
+  });
   pSpec.P_SpecSetFloor({ PFloor: pFloor });
   pSpec.P_SpecSetInter({ PInter: pInter });
   // Wire p_user → p_spec for P_PlayerInSpecialSector.

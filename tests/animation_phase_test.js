@@ -18,7 +18,10 @@ Deno.test('texture animation observes pre-increment leveltime inside P_UpdateSpe
     throw new Error('P_Ticker increments leveltime before texture animation');
   }
 
-  if (!main.includes('pSpec.P_SpecSetExternals({ PLights: pLights, R_AnimateTextures })')) {
+  const wiringStart = main.indexOf('pSpec.P_SpecSetExternals({');
+  const wiringEnd = main.indexOf('\n  });', wiringStart);
+  const wiring = main.slice(wiringStart, wiringEnd);
+  if (wiringStart < 0 || wiringEnd < 0 || !wiring.includes('R_AnimateTextures')) {
     throw new Error('renderer animation callback is not wired into P_UpdateSpecials');
   }
   const browserLoop = main.slice(
