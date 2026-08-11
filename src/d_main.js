@@ -569,8 +569,6 @@ export async function D_DoomMain() {
   const mobjsByMapThing = new Map();
   const bodyqueue = new Array(32); // g_game.c:210 — BODYQUESIZE
   if (typeof window !== 'undefined') window.__mobjsByMapThing = mobjsByMapThing;
-  // Hook for P_RespawnSpecials to call us during nightmare respawn ticks.
-  if (typeof globalThis !== 'undefined') globalThis.__P_SpawnMapThing = (mt) => P_SpawnMapThing(mt);
   const MTF_AMBUSH = 8;
   const MTF_MULTI  = 16;
   // ds module (pre-imported so the spawn callback stays synchronous).

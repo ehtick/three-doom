@@ -10,6 +10,7 @@ import { thinker_t } from './d_think.js';
 import { FRACUNIT } from './m_fixed.js';
 import { states, mobjinfo, S_NULL } from './info.js';
 import { P_Random } from './m_random.js';
+import { P_SpawnRespawnedSpecial } from './p_respawn_logic.js';
 
 // ---------- MF_* flags ----------
 export const MF_SPECIAL      = 1;
@@ -305,9 +306,10 @@ export function P_RespawnSpecials() {
   const ss = R_PointInSubsector(x, y);
   const fog = P_SpawnMobj(x, y, ss.sector.floorheight, 40 /*MT_IFOG*/);
   if (S_StartSound_external !== null) S_StartSound_external(fog, 90 /*sfx_itmbk*/);
-  if (globalThis.__P_SpawnMapThing !== undefined) {
-    globalThis.__P_SpawnMapThing(mthing);
-  }
+  // p_mobj.c:612-629 — resolve doomednum and spawn directly. Going through
+  // P_SpawnMapThing would consume an extra random number for randomized tics,
+  // reapply skill/netgame filters, and increment totalitems a second time.
+  P_SpawnRespawnedSpecial(mthing, mobjinfo, P_SpawnMobj);
   iquetail = (iquetail + 1) & (ITEMQUESIZE - 1);
 }
 
