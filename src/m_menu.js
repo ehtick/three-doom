@@ -116,6 +116,10 @@ const EPISODE_ITEMS = [
   { patch: 'M_EPI4', label: 'Thy Flesh Consumed',     action: () => _chooseEpisode(4) },
 ];
 const EPISODE_MENU = { name: 'Episode', x: 48, y: 63, items: EPISODE_ITEMS };
+// m_menu.c:893-896 — episode heading above the unchanged item rows.
+EPISODE_MENU.draw = (ctx, lx, ly, sx, sy) => {
+  _drawPatchDoom(ctx, 'M_EPISOD', 54, 38, lx, ly, sx, sy);
+};
 function _openEpisodeMenu() {
   EPISODE_MENU.items = EPISODE_ITEMS.slice(0, gamemode === GameMode_t.retail ? 4 : 3);
   pushMenu(EPISODE_MENU);
@@ -147,6 +151,11 @@ const SKILL_MENU = { name: 'Skill', x: 48, y: 63, lastOn: 2, items: [
   { patch: 'M_ULTRA', label: 'Ultra-Violence.',        action: () => _chooseSkill(3) },
   { patch: 'M_NMARE', label: 'Nightmare!',             action: () => _chooseSkill(4) },
 ]};
+// m_menu.c:867-871 — New Game and Choose Skill headings.
+SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
+  _drawPatchDoom(ctx, 'M_NEWG', 96, 14, lx, ly, sx, sy);
+  _drawPatchDoom(ctx, 'M_SKILL', 54, 38, lx, ly, sx, sy);
+};
 
 // m_menu.c:339-372 — OptionsMenu (the "End Game" entry is intentionally
 // omitted in this port). The two `status:-1` spacer rows (option_empty1/2)
