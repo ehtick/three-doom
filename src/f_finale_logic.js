@@ -57,3 +57,22 @@ export function F_GetDoom1ArtPatch(mode, episode) {
 export function F_ShouldAdvanceCommercial(finaleCount, buttons) {
   return finaleCount > 50 && buttons.some((value) => value !== 0);
 }
+
+// f_finale.c:F_BunnyScroll — END0 is held silently, then END1..END6 advance
+// every five tics. The static laststage makes each newly displayed stage fire
+// exactly one pistol sound even when the drawer runs more than once per tic.
+export function F_UpdateBunnyStage(finalecount, laststage) {
+  if (finalecount < 1130) {
+    return { stage: -1, laststage, playPistol: false };
+  }
+  if (finalecount < 1180) {
+    return { stage: 0, laststage: 0, playPistol: false };
+  }
+  const stage = Math.min(((finalecount - 1180) / 5) | 0, 6);
+  const playPistol = stage > laststage;
+  return {
+    stage,
+    laststage: playPistol ? stage : laststage,
+    playPistol,
+  };
+}

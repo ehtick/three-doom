@@ -2,7 +2,7 @@ import { GameMode_t } from '../src/doomdef.js';
 import { C1TEXT, C4TEXT, C5TEXT, C6TEXT, E1TEXT, E4TEXT } from '../src/d_englsh.js';
 import {
   F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
-  F_ShouldStartCommercialFinale,
+  F_ShouldStartCommercialFinale, F_UpdateBunnyStage,
 } from '../src/f_finale_logic.js';
 
 function assertEquals(actual, expected, message) {
@@ -59,4 +59,32 @@ Deno.test('commercial finale skipping polls held ticcmd buttons after 50 tics', 
   assertEquals(F_ShouldAdvanceCommercial(51, [0, 0, 0, 0]), false, 'movement/no buttons');
   assertEquals(F_ShouldAdvanceCommercial(51, [1, 0, 0, 0]), true, 'held attack');
   assertEquals(F_ShouldAdvanceCommercial(51, [0, 2, 0, 0]), true, 'held use from another player');
+});
+
+Deno.test('E3 bunny END stages fire one pistol sound per newly shown frame', () => {
+  let update = F_UpdateBunnyStage(1129, 0);
+  assertEquals(update.stage, -1, 'pre-END stage');
+  assertEquals(update.playPistol, false, 'pre-END sound');
+
+  update = F_UpdateBunnyStage(1130, update.laststage);
+  assertEquals(update.stage, 0, 'END0 stage');
+  assertEquals(update.playPistol, false, 'END0 is silent');
+
+  update = F_UpdateBunnyStage(1185, update.laststage);
+  assertEquals(update.stage, 1, 'END1 stage');
+  assertEquals(update.playPistol, true, 'END1 sound');
+
+  update = F_UpdateBunnyStage(1189, update.laststage);
+  assertEquals(update.stage, 1, 'held END1 stage');
+  assertEquals(update.playPistol, false, 'held END1 stays silent');
+
+  update = F_UpdateBunnyStage(1190, update.laststage);
+  assertEquals(update.stage, 2, 'END2 stage');
+  assertEquals(update.playPistol, true, 'END2 sound');
+
+  update = F_UpdateBunnyStage(9999, update.laststage);
+  assertEquals(update.stage, 6, 'END stage clamp');
+  assertEquals(update.playPistol, true, 'first END6 sound');
+  update = F_UpdateBunnyStage(10000, update.laststage);
+  assertEquals(update.playPistol, false, 'held END6 stays silent');
 });

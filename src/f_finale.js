@@ -14,12 +14,13 @@ import { gameaction_t } from './d_event.js';
 import { V_CreatePaletteCanvasInfo, V_DecodePatchToCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
 import { S_ChangeMusic, S_StartMusic, S_StartSound } from './s_sound.js';
-import { mus_victor, mus_read_m, mus_bunny, mus_evil } from './sounds.js';
+import { mus_victor, mus_read_m, mus_bunny, mus_evil, sfx_pistol } from './sounds.js';
 import { W_CacheLumpNum, W_CheckNumForName, lumpinfo } from './w_wad.js';
 import { firstspritelump } from './r_data.js';
 import { sprites } from './r_things.js';
 import {
   F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
+  F_UpdateBunnyStage,
 } from './f_finale_logic.js';
 import {
   F_CreateCastState, F_GetCastDisplay, F_KillCast, F_TickCast,
@@ -33,6 +34,7 @@ let _done   = null;
 let _finaleText = '';
 let _finaleFlat = '';
 let _commercial = false;
+let _bunnyLastStage = 0;
 const getPatch = V_DecodePatchToCanvas;
 const F_TEXTWAIT = 250;
 // f_finale.c:TEXTSPEED — one character per 3 tics (≈12 chars/s at 35Hz).
@@ -55,6 +57,7 @@ export function F_StartFinale(onDone) {
   _finaleText = spec.text;
   _finaleFlat = spec.flat;
   _commercial = gamemode === GameMode_t.commercial;
+  _bunnyLastStage = 0;
   // The browser rebuilds the local finale ticcmd from held controls each tic.
   // Clear the previous level's last command first so stale buttons cannot skip.
   for (const player of players) {
@@ -163,13 +166,11 @@ function F_BunnyScroll(ctx, dx, dy, dw, dh) {
   if (p2 !== null && scrolled > 0) {
     ctx.drawImage(p2.canvas, 0, 0, scrolled, p2.h, dx + (320 - scrolled) * sx, dy, scrolled * sx, dh);
   }
-  if (_finalecount < 1130) return;
-  let stage;
-  if (_finalecount < 1180) stage = 0;
-  else {
-    stage = ((_finalecount - 1180) / 5) | 0;
-    if (stage > 6) stage = 6;
-  }
+  const bunny = F_UpdateBunnyStage(_finalecount, _bunnyLastStage);
+  _bunnyLastStage = bunny.laststage;
+  if (bunny.stage < 0) return;
+  if (bunny.playPistol) S_StartSound(null, sfx_pistol);
+  const stage = bunny.stage;
   const end = getPatch(`END${stage}`);
   if (end !== null) {
     const ex = dx + ((320 - end.w) / 2) * sx;
