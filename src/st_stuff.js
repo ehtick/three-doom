@@ -2,7 +2,7 @@
 // Status bar: STBAR + STARMS + STTNUM* + STYSNUM*/STGNUM* + STKEYS* + STF***
 // face widgets, all rendered via Canvas2D from the WAD's actual patches.
 
-import { players, consoleplayer } from './doomstat.js';
+import { players, consoleplayer, deathmatch } from './doomstat.js';
 import { weapontype_t, ammotype_t } from './doomdef.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
@@ -10,7 +10,8 @@ import { M_Random } from './m_random.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
 import {
-  ST_ARMORX, ST_BIG_NUMBER_Y, ST_HEALTHX, ST_PERCENT_PATCH,
+  ST_ARMORX, ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX,
+  ST_FRAGSWIDTH, ST_HEALTHX, ST_PERCENT_PATCH,
 } from './st_status_logic.js';
 
 // Patches are decoded + cached centrally in v_video.js (V_DecodePatchToCanvas).
@@ -32,6 +33,32 @@ function drawNumber(ctx, num, rightX, y, sx, sy, family) {
   for (const d of digits) {
     ctx.drawImage(d.canvas, cx, y, d.w * sx, d.h * sy);
     cx += d.w * sx;
+  }
+}
+
+// STlib_drawNum's signed two-column path used by the deathmatch frag widget.
+function drawFragNumber(ctx, num, rightX, y, sx, sy) {
+  let value = num | 0;
+  const negative = value < 0;
+  if (negative) {
+    if (value < -9) value = -9; // width==2 source clamp leaves room for '-'.
+    value = -value;
+  }
+  const zero = getPatch('STTNUM0');
+  if (zero === null) return;
+  const digitWidth = zero.w;
+  let x = rightX;
+  let digits = ST_FRAGSWIDTH;
+  if (value === 0) {
+    drawPatchAt(ctx, zero, x - digitWidth * sx, y, sx, sy);
+  }
+  while (value !== 0 && digits-- > 0) {
+    x -= digitWidth * sx;
+    drawPatchAt(ctx, getPatch(`STTNUM${value % 10}`), x, y, sx, sy);
+    value = Math.trunc(value / 10);
+  }
+  if (negative) {
+    drawPatchAt(ctx, getPatch('STTMINUS'), x - 8 * sx, y, sx, sy);
   }
 }
 
@@ -323,17 +350,24 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
   drawNumber(overlayCtx, p.health, dstX + ST_HEALTHX * sx,
     dstY + ST_BIG_NUMBER_Y * sy, sx, sy, 'STTNUM');
-  // 4) STARMS widget — slots 2..7 = pistol..bfg.
-  const starms = getPatch('STARMS');
-  if (starms !== null) {
-    overlayCtx.drawImage(starms.canvas, dstX + 104 * sx, barY, starms.w * sx, starms.h * sy);
-  }
-  // STYSNUM (yellow) if owned, STGNUM (gray) if not.
-  for (const [px, py, weap] of ARMS_CELLS) {
-    const owned = p.weaponowned[weap] === true || p.weaponowned[weap] === 1;
-    const family = owned ? 'STYSNUM' : 'STGNUM';
-    const digit = getPatch(`${family}${weap + 1}`);
-    if (digit !== null) overlayCtx.drawImage(digit.canvas, dstX + px * sx, dstY + py * sy, digit.w * sx, digit.h * sy);
+  // 4) The middle widget is mutually exclusive: STARMS in normal/co-op play,
+  // or the signed two-digit frag sum in deathmatch.
+  const middle = ST_DeathmatchStatusPlan(deathmatch, p.frags, consoleplayer);
+  if (middle.showArms) {
+    const starms = getPatch('STARMS');
+    if (starms !== null) {
+      overlayCtx.drawImage(starms.canvas, dstX + 104 * sx, barY, starms.w * sx, starms.h * sy);
+    }
+    // STYSNUM (yellow) if owned, STGNUM (gray) if not.
+    for (const [px, py, weap] of ARMS_CELLS) {
+      const owned = p.weaponowned[weap] === true || p.weaponowned[weap] === 1;
+      const family = owned ? 'STYSNUM' : 'STGNUM';
+      const digit = getPatch(`${family}${weap + 1}`);
+      if (digit !== null) overlayCtx.drawImage(digit.canvas, dstX + px * sx, dstY + py * sy, digit.w * sx, digit.h * sy);
+    }
+  } else if (middle.showFrags) {
+    drawFragNumber(overlayCtx, middle.fragCount, dstX + ST_FRAGSX * sx,
+      dstY + ST_BIG_NUMBER_Y * sy, sx, sy);
   }
   // 5) Face widget — animated. V_DrawPatch subtracts patch->leftoffset/topoffset.
   const face = getPatch(faceLumpName()) || getPatch('STFST00');

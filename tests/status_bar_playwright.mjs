@@ -38,6 +38,7 @@ try {
     const player = doomstat.players[doomstat.consoleplayer];
     player.health = 100;
     player.armorpoints = 0;
+    doomstat.set_deathmatch(0);
     status.ST_Drawer(ctx, 0, 0, 320, 200);
 
     const actual = ctx.getImageData(0, 0, 320, 200).data;
@@ -62,17 +63,78 @@ try {
       }
       return { opaque, mismatch };
     }
-    return {
+    const percentResult = {
       healthPercent: comparePatch(90, 171),
       armorPercent: comparePatch(221, 171),
     };
+
+    function patch(target, name, x, y) {
+      video.V_DrawPatchAtCanvas(
+        target, video.V_DecodePatchToCanvas(name), x, y, 1, 1,
+      );
+    }
+    function middleMismatch(actualCanvas, expectedCanvas) {
+      const a = actualCanvas.getContext('2d').getImageData(104, 168, 39, 32).data;
+      const e = expectedCanvas.getContext('2d').getImageData(104, 168, 39, 32).data;
+      let mismatch = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== e[i]) mismatch++;
+      return mismatch;
+    }
+    function renderStatus() {
+      const value = document.createElement('canvas');
+      value.width = 320;
+      value.height = 200;
+      status.ST_Drawer(value.getContext('2d'), 0, 0, 320, 200);
+      return value;
+    }
+    function expectedMiddle(showArms) {
+      const value = document.createElement('canvas');
+      value.width = 320;
+      value.height = 200;
+      const target = value.getContext('2d');
+      patch(target, 'STBAR', 0, 168);
+      if (showArms) {
+        patch(target, 'STARMS', 104, 168);
+        const cells = [
+          [111, 172, 2], [123, 172, 3], [135, 172, 4],
+          [111, 182, 5], [123, 182, 6], [135, 182, 7],
+        ];
+        for (const [x, y, digit] of cells) patch(target, `STYSNUM${digit}`, x, y);
+      } else {
+        patch(target, 'STTNUM1', 110, 171);
+        patch(target, 'STTNUM2', 124, 171);
+      }
+      return value;
+    }
+
+    player.weaponowned.fill(true);
+    doomstat.set_deathmatch(0);
+    const normal = renderStatus();
+    const normalMiddleMismatch = middleMismatch(normal, expectedMiddle(true));
+
+    player.frags.fill(0);
+    player.frags[0] = 3;
+    player.frags[1] = 10;
+    player.frags[2] = 5; // 10 + 5 - 3 = 12.
+    doomstat.set_deathmatch(1);
+    const deathmatch = renderStatus();
+    const deathmatchMiddleMismatch = middleMismatch(deathmatch, expectedMiddle(false));
+    doomstat.set_deathmatch(0);
+
+    return { ...percentResult, normalMiddleMismatch, deathmatchMiddleMismatch };
   });
 
   const failures = [];
-  for (const [name, value] of Object.entries(result)) {
+  for (const [name, value] of Object.entries({
+    healthPercent: result.healthPercent,
+    armorPercent: result.armorPercent,
+  })) {
     if (value.opaque === 0 || value.mismatch !== 0) {
       failures.push(`${name}: ${JSON.stringify(value)}`);
     }
+  }
+  if (result.normalMiddleMismatch !== 0 || result.deathmatchMiddleMismatch !== 0) {
+    failures.push(`middle widgets: ${JSON.stringify(result)}`);
   }
   if (errors.length !== 0) failures.push(`page errors: ${errors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
