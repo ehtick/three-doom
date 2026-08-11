@@ -170,7 +170,7 @@ try {
       result.mode2Draw.thingSegments !== result.thingCount * 3) {
     failures.push(`mode 2 thing segments mismatch: ${JSON.stringify(result)}`);
   }
-  if (result.mode0Draw.playerSegments !== 2 || result.mode1Draw.playerSegments !== 16 ||
+  if (result.mode0Draw.playerSegments !== 7 || result.mode1Draw.playerSegments !== 16 ||
       result.mode2Draw.playerSegments !== 16) {
     failures.push(`player arrow segment mismatch: ${JSON.stringify(result)}`);
   }

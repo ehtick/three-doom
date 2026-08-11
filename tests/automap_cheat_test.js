@@ -2,6 +2,8 @@ import {
   AM_CheatPlayerSegments,
   AM_GetCheatLevel,
   AM_LineColorForMode,
+  AM_PlayerDrawPlan,
+  AM_PlayerSegments,
   AM_Responder,
   AM_Start,
   AM_Stop,
@@ -131,6 +133,20 @@ Deno.test('thing and IDDT arrow geometry use exact fixed-point line characters',
   );
 
   assertDeepEquals(
+    AM_PlayerSegments({ x: 0, y: 0, angle: 0 }),
+    [
+      segment(-1048576, 0, 1198372, 0),
+      segment(1198372, 0, 599186, 299593),
+      segment(1198372, 0, 599186, -299593),
+      segment(-1048576, 0, -1348168, 299593),
+      segment(-1048576, 0, -1348168, -299593),
+      segment(-748983, 0, -1048576, 299593),
+      segment(-748983, 0, -1048576, -299593),
+    ],
+    'seven-stroke normal player arrow',
+  );
+
+  assertDeepEquals(
     AM_CheatPlayerSegments({ x: 0, y: 0, angle: 0 }),
     [
       segment(-1048576, 0, 1198372, 0),
@@ -151,6 +167,81 @@ Deno.test('thing and IDDT arrow geometry use exact fixed-point line characters',
       segment(237177, -208645, 319565, -171196),
     ],
     '16-stroke DDT player arrow',
+  );
+});
+
+Deno.test('automap player plan matches co-op, deathmatch, and invisibility rules', () => {
+  const roster = Array.from({ length: 4 }, (_, i) => ({
+    mo: { x: i, y: -i, angle: 0 },
+    powers: [0, 0, i === 2 ? 1 : 0, 0, 0, 0],
+  }));
+  const active = [true, true, true, true];
+
+  const single = AM_PlayerDrawPlan({
+    roster,
+    active,
+    localIndex: 0,
+    isNetgame: false,
+    cheatLevel: 0,
+  });
+  assertDeepEquals(
+    single.map(({ playerIndex, color, cheat }) => ({ playerIndex, color, cheat })),
+    [{ playerIndex: 0, color: 209, cheat: false }],
+    'single-player arrow',
+  );
+  const singleCheat = AM_PlayerDrawPlan({
+    roster,
+    active,
+    localIndex: 0,
+    isNetgame: false,
+    cheatLevel: 1,
+  });
+  assertEquals(singleCheat[0].cheat, true, 'single-player DDT arrow');
+
+  const coop = AM_PlayerDrawPlan({
+    roster,
+    active,
+    localIndex: 0,
+    isNetgame: true,
+    deathmatchMode: 0,
+  });
+  assertDeepEquals(
+    coop.map(({ playerIndex, color, cheat }) => ({ playerIndex, color, cheat })),
+    [
+      { playerIndex: 0, color: 112, cheat: false },
+      { playerIndex: 1, color: 96, cheat: false },
+      { playerIndex: 2, color: 246, cheat: false },
+      { playerIndex: 3, color: 176, cheat: false },
+    ],
+    'co-op slot and invisibility colors',
+  );
+
+  const deathmatchOnlyLocal = AM_PlayerDrawPlan({
+    roster,
+    active,
+    localIndex: 2,
+    isNetgame: true,
+    deathmatchMode: 1,
+    isSingleDemo: false,
+  });
+  assertDeepEquals(
+    deathmatchOnlyLocal.map(({ playerIndex, color }) => ({ playerIndex, color })),
+    [{ playerIndex: 2, color: 246 }],
+    'deathmatch hides opponents',
+  );
+
+  const singleDemo = AM_PlayerDrawPlan({
+    roster,
+    active: [true, false, true, false],
+    localIndex: 0,
+    isNetgame: true,
+    deathmatchMode: 2,
+    isSingleDemo: true,
+  });
+  assertDeepEquals(
+    singleDemo.map(({ playerIndex, color }) => ({ playerIndex, color })),
+    [{ playerIndex: 0, color: 112 }, { playerIndex: 2, color: 246 }],
+    'single demo shows active opponents without compacting slot colors',
   );
 });
 

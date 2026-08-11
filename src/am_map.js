@@ -8,10 +8,10 @@ import {
 } from './p_setup.js';
 import {
   players, playeringame, consoleplayer, automapactive, set_automapactive,
-  gameepisode, gamemap, deathmatch, netgame,
+  gameepisode, gamemap, deathmatch, netgame, singledemo,
 } from './doomstat.js';
 import { ML_DONTDRAW, ML_SECRET, ML_MAPPED } from './doomdata.js';
-import { KEY_TAB } from './doomdef.js';
+import { KEY_TAB, MAXPLAYERS, powertype_t } from './doomdef.js';
 import { evtype_t } from './d_event.js';
 import { FixedMul, FRACUNIT } from './m_fixed.js';
 import { finecosine, finesine } from './tables.js';
@@ -68,6 +68,8 @@ export const AM_THING_COLOR = 7 * 16;    // THINGCOLORS (GREENS)
 const COLOR_PLAYER     = 256 - 47;        // YOURCOLORS (WHITE)
 const COLOR_GRID       = 6 * 16 + 8;     // GRIDCOLORS (GRAYS + 8)
 const COLOR_MARK       = 103;            // opaque AMMNUM patch pixel index
+const PLAYER_COLORS    = [7 * 16, 6 * 16, 4 * 16, 256 - 5 * 16];
+const COLOR_INVISIBLE_PLAYER = 246;
 
 function mapLine(ax, ay, bx, by) {
   return { a: { x: ax, y: ay }, b: { x: bx, y: by } };
@@ -84,6 +86,18 @@ const THIN_TRIANGLE = [
 const PLAYER_RADIUS = 16 * FRACUNIT;
 const ARROW_R = Math.trunc((8 * PLAYER_RADIUS) / 7);
 const div = (value, divisor) => Math.trunc(value / divisor);
+
+// am_map.c:155-171 — the normal seven-stroke player arrow. Its dimensions are
+// map units, not a fixed number of Canvas pixels, so it zooms with the map.
+const PLAYER_ARROW = [
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, ARROW_R, 0),
+  mapLine(ARROW_R, 0, ARROW_R - div(ARROW_R, 2), div(ARROW_R, 4)),
+  mapLine(ARROW_R, 0, ARROW_R - div(ARROW_R, 2), -div(ARROW_R, 4)),
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, -ARROW_R - div(ARROW_R, 8), div(ARROW_R, 4)),
+  mapLine(-ARROW_R + div(ARROW_R, 8), 0, -ARROW_R - div(ARROW_R, 8), -div(ARROW_R, 4)),
+  mapLine(-ARROW_R + div(3 * ARROW_R, 8), 0, -ARROW_R + div(ARROW_R, 8), div(ARROW_R, 4)),
+  mapLine(-ARROW_R + div(3 * ARROW_R, 8), 0, -ARROW_R + div(ARROW_R, 8), -div(ARROW_R, 4)),
+];
 
 // am_map.c:157-195 — the 16 strokes spell "ddt" inside the longer player
 // arrow whenever the single-player automap cheat is active.
@@ -143,6 +157,53 @@ export function AM_ThingSegments(thing) {
 
 export function AM_CheatPlayerSegments(mo) {
   return lineCharacterSegments(CHEAT_PLAYER_ARROW, 0, mo.angle, mo.x, mo.y);
+}
+
+export function AM_PlayerSegments(mo) {
+  return lineCharacterSegments(PLAYER_ARROW, 0, mo.angle, mo.x, mo.y);
+}
+
+// am_map.c:AM_drawPlayers, kept pure enough for multiplayer/demo matrices.
+// Slot colors advance even across inactive players, hence the direct index.
+export function AM_PlayerDrawPlan({
+  roster = players,
+  active = playeringame,
+  localIndex = consoleplayer,
+  isNetgame = netgame,
+  deathmatchMode = deathmatch,
+  isSingleDemo = singledemo,
+  cheatLevel = _cheating,
+} = {}) {
+  let resolvedLocal = localIndex | 0;
+  if (active[resolvedLocal] !== true) {
+    resolvedLocal = active.findIndex((value) => value === true);
+  }
+  const localPlayer = resolvedLocal >= 0 ? roster[resolvedLocal] : null;
+
+  if (isNetgame !== true) {
+    if (localPlayer?.mo == null) return [];
+    return [{
+      playerIndex: resolvedLocal,
+      mo: localPlayer.mo,
+      color: COLOR_PLAYER,
+      cheat: (cheatLevel | 0) !== 0,
+    }];
+  }
+
+  const result = [];
+  for (let i = 0; i < MAXPLAYERS; i++) {
+    const player = roster[i];
+    if (deathmatchMode !== 0 && isSingleDemo !== true && player !== localPlayer) continue;
+    if (active[i] !== true || player?.mo == null) continue;
+    const invisible = (player.powers?.[powertype_t.pw_invisibility] ?? 0) !== 0;
+    result.push({
+      playerIndex: i,
+      mo: player.mo,
+      color: invisible ? COLOR_INVISIBLE_PLAYER : PLAYER_COLORS[i],
+      cheat: false,
+    });
+  }
+  return result;
 }
 
 // am_map.c:AM_NUMMARKPOINTS — player-placed map markers. x === -1 means empty.
@@ -331,31 +392,22 @@ export function AM_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     overlayCtx.stroke();
   }
 
-  // Player triangle.
-  if (p !== undefined && p !== null && p.mo !== null) {
-    overlayCtx.strokeStyle = V_PaletteCSS(COLOR_PLAYER);
-    if (netgame !== true && _cheating !== 0) {
-      overlayCtx.lineWidth = 1;
-      overlayCtx.beginPath();
-      for (const segment of AM_CheatPlayerSegments(p.mo)) {
-        const [x1, y1] = project(segment.a.x, segment.a.y);
-        const [x2, y2] = project(segment.b.x, segment.b.y);
-        overlayCtx.moveTo(x1, y1);
-        overlayCtx.lineTo(x2, y2);
-      }
-      overlayCtx.stroke();
-    } else {
-      const [px, py] = project(p.mo.x, p.mo.y);
-      const angle = (p.mo.angle >>> 0) / 0x100000000 * Math.PI * 2;
-      const r = 12;
-      overlayCtx.lineWidth = 2;
-      overlayCtx.beginPath();
-      overlayCtx.moveTo(px + Math.cos(angle) * r, py - Math.sin(angle) * r);
-      overlayCtx.lineTo(px + Math.cos(angle + 2.5) * r * 0.7, py - Math.sin(angle + 2.5) * r * 0.7);
-      overlayCtx.lineTo(px + Math.cos(angle - 2.5) * r * 0.7, py - Math.sin(angle - 2.5) * r * 0.7);
-      overlayCtx.closePath();
-      overlayCtx.stroke();
+  // am_map.c:AM_drawPlayers — exact fixed-point arrow geometry, plus every
+  // active network player with the reference slot/invisibility colors.
+  overlayCtx.lineWidth = 1;
+  for (const entry of AM_PlayerDrawPlan()) {
+    overlayCtx.strokeStyle = V_PaletteCSS(entry.color);
+    overlayCtx.beginPath();
+    const segments = entry.cheat
+      ? AM_CheatPlayerSegments(entry.mo)
+      : AM_PlayerSegments(entry.mo);
+    for (const segment of segments) {
+      const [x1, y1] = project(segment.a.x, segment.a.y);
+      const [x2, y2] = project(segment.b.x, segment.b.y);
+      overlayCtx.moveTo(x1, y1);
+      overlayCtx.lineTo(x2, y2);
     }
+    overlayCtx.stroke();
   }
 
   // am_map.c:1285-1302,1341-1342 — the second IDDT mode draws every mobj as
