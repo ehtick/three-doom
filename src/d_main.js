@@ -815,6 +815,10 @@ export async function D_DoomMain() {
       P_RespawnSpecials: PM.P_RespawnSpecials,
       P_UpdateSpecials: pSpec.P_UpdateSpecials,
     });
+    // g_game.c:G_DoLoadLevel clears gamekeydown, mouse axes/buttons, and the
+    // queued pause after P_SetupLevel. Do this on every load without removing
+    // the early-installed DOM listeners.
+    D_KeyboardInput.resetForLevel();
     const localPlayer = doomstat.players[doomstat.consoleplayer];
     if (localPlayer !== null && localPlayer !== undefined) D_KeyboardInput.init(localPlayer);
   };

@@ -249,7 +249,8 @@ export function G_DoLoadLevel() {
   }
   set_gameaction(gameaction_t.ga_nothing);
   // g_game.c:494 — a level load clears any pause held over from the menu or a
-  // prior level. (sendpause/sendsave are netgame ticcmd flags — not ported.)
+  // prior level. d_main's load hook clears d_keyboard's queued sendpause with
+  // the rest of its browser-local command state after level setup.
   doomstat.set_paused(false);
   if (_loadLevel !== null) _loadLevel(gameepisode, gamemap, gameskill);
 }

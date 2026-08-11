@@ -42,6 +42,18 @@ export function D_ScaleMouseDelta(delta, mouseSensitivity) {
   return Math.trunc((delta | 0) * ((mouseSensitivity | 0) + 5) / 10) | 0;
 }
 
+// g_game.c:G_DoLoadLevel clears the command-building inputs after level setup.
+// Keep the reset limited to those exact held/queued fields: turn acceleration
+// and double-click timing are separate G_BuildTiccmd statics in the reference.
+export function D_ResetLevelInputState(state) {
+  state.keys.clear();
+  state.mouseDX = 0;
+  state.mouseDY = 0;
+  state.mouseButtons = 0;
+  state.sendpause = false;
+  return state;
+}
+
 export function D_ComputeMovement(input, turnheld) {
   const fast = input.fast === true;
   const forwardStep = fast ? 50 : 25;

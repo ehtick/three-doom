@@ -9,6 +9,7 @@ import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT, evtype_t } from './d_
 import {
   D_ComputeMovement,
   D_MouseStrafePressed,
+  D_ResetLevelInputState,
   D_ScaleMouseDelta,
   D_ShouldCaptureGameplayPress,
 } from './d_input_logic.js';
@@ -205,6 +206,20 @@ function onMouseMove(e) {
     }
 }
 
+function resetLevelInput() {
+  const state = D_ResetLevelInputState({
+    keys,
+    mouseDX,
+    mouseDY,
+    mouseButtons,
+    sendpause,
+  });
+  mouseDX = state.mouseDX;
+  mouseDY = state.mouseDY;
+  mouseButtons = state.mouseButtons;
+  sendpause = state.sendpause;
+}
+
 function installListeners() {
   if (_listenersInstalled) return;
   _listenersInstalled = true;
@@ -255,6 +270,7 @@ export function D_AcquirePointerLock() {
 export const D_KeyboardInput = {
   init(_player) { installListeners(); },
   installEarly() { installListeners(); },
+  resetForLevel() { resetLevelInput(); },
   shutdown() { shutdownListeners(); },
 
   // Finale F_Ticker reads player.cmd.buttons exactly like linuxdoom. Movement

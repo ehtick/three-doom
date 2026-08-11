@@ -35,6 +35,7 @@ try {
   const result = await page.evaluate(async () => {
     const keyboard = await import('/src/d_keyboard.js');
     const doomstat = await import('/src/doomstat.js');
+    const game = await import('/src/g_game.js');
     const menu = await import('/src/m_menu.js');
     const loop = await import('/src/d_loop.js');
 
@@ -142,6 +143,30 @@ try {
     mouseMove(7, -7);
     const sensitivityMovement = sample();
 
+    // Stage every command-building input, including the queued Pause special,
+    // then run the real G_DoLoadLevel -> d_main loadLevel path. The new level
+    // must start neutral, and its already-installed listener must stay live.
+    doomstat.set_mouseSensitivity(5);
+    doomstat.set_paused(true);
+    key('keydown', 'KeyW', 'w');
+    key('keydown', 'ControlLeft', 'Control');
+    key('keydown', 'Space', ' ');
+    key('keydown', 'Pause', 'Pause');
+    lockedCanvas = canvas;
+    document.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true }));
+    mouseMove(9, -5);
+    game.G_DoLoadLevel();
+    const afterLevelLoad = sample();
+    const pausedAfterLevelLoad = doomstat.paused;
+    key('keydown', 'KeyW', 'w');
+    const listenerAfterLevelLoad = sample();
+    key('keyup', 'KeyW', 'w');
+    key('keyup', 'ControlLeft', 'Control');
+    key('keyup', 'Space', ' ');
+    key('keyup', 'Pause', 'Pause');
+    document.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
+    sample();
+
     const netgameDuringCheck = doomstat.netgame;
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
@@ -160,6 +185,9 @@ try {
       sensitivityBefore,
       sensitivityAfter,
       sensitivityMovement,
+      afterLevelLoad,
+      pausedAfterLevelLoad,
+      listenerAfterLevelLoad,
     };
   });
 
@@ -183,6 +211,15 @@ try {
       result.sensitivityMovement.angleturn !== -48 ||
       result.sensitivityMovement.buttons !== 0) {
     failures.push(`scaled mouse movement mismatch: ${JSON.stringify(result.sensitivityMovement)}`);
+  }
+  if (!zero(result.afterLevelLoad) || result.pausedAfterLevelLoad !== false) {
+    failures.push(`level load retained input/pause: ${JSON.stringify({
+      cmd: result.afterLevelLoad,
+      paused: result.pausedAfterLevelLoad,
+    })}`);
+  }
+  if (result.listenerAfterLevelLoad.forwardmove !== 25) {
+    failures.push('level input reset removed or disabled the DOM listener');
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

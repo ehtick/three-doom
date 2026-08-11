@@ -1,6 +1,7 @@
 import {
   D_ComputeMovement,
   D_MouseStrafePressed,
+  D_ResetLevelInputState,
   D_ScaleMouseDelta,
   D_ShouldCaptureGameplayPress,
 } from '../src/d_input_logic.js';
@@ -100,5 +101,30 @@ Deno.test('mouse sensitivity uses vanilla integer truncation toward zero', () =>
     if (actual !== expected || Object.is(actual, -0)) {
       throw new Error(`delta ${delta}, sensitivity ${sensitivity}: expected ${expected}, got ${actual}`);
     }
+  }
+});
+
+Deno.test('level input reset clears held command state without replacing keys', () => {
+  const keys = new Set(['KeyW', 'ControlLeft']);
+  const state = {
+    keys,
+    mouseDX: 17,
+    mouseDY: -9,
+    mouseButtons: 5,
+    sendpause: true,
+  };
+  const reset = D_ResetLevelInputState(state);
+  if (reset !== state || reset.keys !== keys || keys.size !== 0 ||
+      reset.mouseDX !== 0 || reset.mouseDY !== 0 ||
+      reset.mouseButtons !== 0 || reset.sendpause !== false) {
+    throw new Error(`level input reset mismatch: ${JSON.stringify({
+      sameState: reset === state,
+      sameKeys: reset.keys === keys,
+      keyCount: keys.size,
+      mouseDX: reset.mouseDX,
+      mouseDY: reset.mouseDY,
+      mouseButtons: reset.mouseButtons,
+      sendpause: reset.sendpause,
+    })}`);
   }
 });
