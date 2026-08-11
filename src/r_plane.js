@@ -8,6 +8,7 @@ import { NF_SUBSECTOR } from './doomdata.js';
 import { R_GetFlatTexture, R_RegisterFlatMesh } from './r_data.js';
 import { R_MakeDoomMaterial } from './r_shader.js';
 import { skyflatnum } from './doomstat.js';
+import { R_FlatTextureUV } from './r_plane_mapping.js';
 
 // sector → [{bucket, kind, startVertex, vertexCount}] for the by-sector updaters.
 const _sectorContribs = new Map();
@@ -83,8 +84,9 @@ function pushConvexPoly(buckets, flatnum, sector, poly, height, reverse, kind) {
   const l = sector.lightlevel >> 4;
   for (let i = 0; i < poly.length; i++) {
     const x = poly[i].x, y = poly[i].y;
+    const uv = R_FlatTextureUV(x, y);
     b.positions.push(x, height, -y);
-    b.uvs.push(x / 64, y / 64);
+    b.uvs.push(uv.u, uv.v);
     b.colors.push(l, l, l);
   }
   for (let i = 1; i < poly.length - 1; i++) {
