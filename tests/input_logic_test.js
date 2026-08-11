@@ -1,4 +1,8 @@
-import { D_ComputeMovement, D_MouseStrafePressed } from '../src/d_input_logic.js';
+import {
+  D_ComputeMovement,
+  D_MouseStrafePressed,
+  D_ShouldCaptureGameplayPress,
+} from '../src/d_input_logic.js';
 
 function assertMovement(input, turnheld, expected, message) {
   const actual = D_ComputeMovement(input, turnheld);
@@ -69,5 +73,14 @@ Deno.test('strafe double-click edges come only from the middle mouse button', ()
       D_MouseStrafePressed(4) !== false ||
       D_MouseStrafePressed(7) !== true) {
     throw new Error('mousebstrafe bit decoding does not match vanilla');
+  }
+});
+
+Deno.test('menu responder consumption has precedence over gameplay presses', () => {
+  if (D_ShouldCaptureGameplayPress(false) !== true) {
+    throw new Error('unhandled input was not offered to gameplay');
+  }
+  if (D_ShouldCaptureGameplayPress(true) !== false) {
+    throw new Error('menu-consumed input leaked into gameplay');
   }
 });

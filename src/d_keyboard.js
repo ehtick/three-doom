@@ -4,10 +4,10 @@
 // We expose a `buildCmd(player)` function called from D_DoomLoop's tic step,
 // so cmd is written exactly once per tic (in sync with P_PlayerThink).
 
-import { renderer, I_RegisterGraphicsShutdownHook } from './i_video.js';
-import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT } from './d_event.js';
-import { KEY_F11 } from './doomdef.js';
-import { D_ComputeMovement, D_MouseStrafePressed } from './d_input_logic.js';
+import { renderer, I_RegisterGraphicsShutdownHook, I_TranslateKey } from './i_video.js';
+import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT, evtype_t } from './d_event.js';
+import { D_ComputeMovement, D_MouseStrafePressed, D_ShouldCaptureGameplayPress } from './d_input_logic.js';
+import * as doomstat from './doomstat.js';
 
 // Cache cross-module references at module load — keystrokes are a hot path
 // and `await import()` per event adds microtask latency. The dynamic-import
@@ -42,7 +42,6 @@ function listenerIsActive(generation) {
 }
 async function onKeyDown(e) {
       const generation = _listenerGeneration;
-      keys.add(e.code);
       // preventDefault must run SYNCHRONOUSLY during dispatch — call it before
       // any awaited dynamic imports below, otherwise the browser's default
       // (e.g. Space scrolling the page) fires first.
@@ -52,22 +51,33 @@ async function onKeyDown(e) {
           e.code === 'Pause') {
         e.preventDefault?.();
       }
-      const ds = await import('./doomstat.js');
-      if (listenerIsActive(generation) !== true) return;
+      // d_main.c:D_ProcessEvents gives M_Responder first refusal on every
+      // event. Keep this synchronous and before keys.add so a menu-consumed
+      // press never appears in a ticcmd (including while a netgame keeps
+      // ticking). M_Responder ignores keyups; onKeyUp still clears them below.
+      const doomKey = I_TranslateKey(e);
+      const menuConsumed = doomKey !== 0 && (_mMenu !== null
+        ? _mMenu.M_Responder({ type: evtype_t.ev_keydown, data1: doomKey, data2: 0, data3: 0 }) === true
+        : doomstat.menuactive === true);
+      if (D_ShouldCaptureGameplayPress(menuConsumed) !== true) {
+        e.preventDefault?.();
+        return;
+      }
+      keys.add(e.code);
       // KEY_PAUSE — toggle pause during live (non-demo) gameplay. Latch the
       // request; buildCmd encodes it into the next ticcmd and G_CheckSpecialButtons
       // performs the paused/music toggle. Ignored outside a level so it can't
       // strand sendpause across a demo (which bypasses buildCmd).
       if (e.code === 'Pause') {
-        if (ds.gamestate === 0 /*GS_LEVEL*/ && ds.demoplayback !== true) sendpause = true;
+        if (doomstat.gamestate === 0 /*GS_LEVEL*/ && doomstat.demoplayback !== true) sendpause = true;
         return;
       }
       // Outside active gameplay (title pages / demo playback), any non-Esc
       // keypress opens the main menu so the user doesn't have to know which
       // key to press. Esc keeps the menu closed in that state.
-      if (ds.menuactive !== true &&
-          (ds.gamestate === 3 /*GS_DEMOSCREEN*/ ||
-           (ds.gamestate === 0 /*GS_LEVEL*/ && ds.demoplayback === true))) {
+      if (doomstat.menuactive !== true &&
+          (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ ||
+           (doomstat.gamestate === 0 /*GS_LEVEL*/ && doomstat.demoplayback === true))) {
         if (e.code !== 'Escape' && _mMenu !== null) _mMenu.M_StartControlPanel();
         e.preventDefault?.();
         return;
@@ -76,13 +86,12 @@ async function onKeyDown(e) {
       // automap / cheats so the press-to-continue gesture isn't mistaken
       // for an in-game action. (gamestate_t.GS_INTERMISSION === 1)
       //
-      // ALWAYS consume the key while gamestate==INTERMISSION, even if
-      // WI_Responder returns false (it does once WI._active flips off after
-      // onDone fires — there's a 1-tic gap before gamestate transitions to
-      // GS_LEVEL). Without the unconditional swallow, an Escape pressed in
-      // that window falls through to the menu branch below and opens the
-      // main menu instead of doing nothing.
-      if (ds.gamestate === 1 /*GS_INTERMISSION*/) {
+      // ALWAYS consume non-menu key handling while gamestate==INTERMISSION,
+      // even if WI_Responder returns false (it does once WI._active flips off
+      // after onDone fires — there's a 1-tic gap before gamestate transitions
+      // to GS_LEVEL). M_Responder has already had vanilla's first refusal;
+      // Escape can therefore still open or navigate the global menu.
+      if (doomstat.gamestate === 1 /*GS_INTERMISSION*/) {
         // Ignore keyboard auto-repeat so a held key accelerates the tally only
         // once per physical press — matches vanilla WI_checkForAccelerate's
         // rising-edge (attackdown/usedown) debounce.
@@ -96,9 +105,9 @@ async function onKeyDown(e) {
       }
       // Outside the MAP30 cast, finales advance from held attack/use buttons
       // sampled into ticcmds—not arbitrary key events. Consume other keys so
-      // they cannot leak into automap, cheats, or weapon selection. Escape may
-      // still reach the menu, matching the global menu responder.
-      if (ds.gamestate === 2 /*GS_FINALE*/ && ds.menuactive !== true) {
+      // they cannot leak into automap, cheats, or weapon selection. Escape was
+      // already offered to the global menu responder above.
+      if (doomstat.gamestate === 2 /*GS_FINALE*/ && doomstat.menuactive !== true) {
         const finale = await import('./f_finale.js');
         if (listenerIsActive(generation) !== true) return;
         if (e.code !== 'Escape' && e.repeat !== true &&
@@ -129,23 +138,6 @@ async function onKeyDown(e) {
         if (listenerIsActive(generation) !== true) return;
         am.AM_Responder({ type: 0, data1: 0x66 });
       }
-      // Menu — Esc opens/closes; while menu is open or a modal is up, route
-      // arrows / Enter / Backspace / y / n through M_Responder.
-      else if (e.code === 'Escape' || e.code === 'F11' || ds.menuactive) {
-        const m = await import('./m_menu.js');
-        if (listenerIsActive(generation) !== true) return;
-        const codeToKey = {
-          Escape: 27, Enter: 13, NumpadEnter: 13, Backspace: 127 /*KEY_BACKSPACE*/,
-          ArrowUp: 0xad, ArrowDown: 0xaf, ArrowLeft: 0xac, ArrowRight: 0xae,
-          F11: KEY_F11,
-          KeyY: 0x79, KeyN: 0x6e,
-        };
-        const data1 = codeToKey[e.code];
-        if (data1 !== undefined && m.M_Responder({ type: 0, data1 })) {
-          e.preventDefault?.();
-          return;
-        }
-      }
       // Cheat sequencer — feed each lowercase letter through the table.
       else if (e.code.startsWith('Key')) {
         const ch = e.code.charAt(3).toLowerCase().charCodeAt(0);
@@ -165,22 +157,31 @@ async function onKeyDown(e) {
       }
 }
 
+// Vanilla lets keyups fall through M_Responder to G_Responder. Always clear a
+// release, even while the menu is active, so pre-menu movement cannot stick in
+// a live netgame.
 function onKeyUp(e) { keys.delete(e.code); }
 
-async function onMouseDown(e) {
-    const generation = _listenerGeneration;
+function onMouseDown(e) {
+    // i_video owns the actual menu tap on the later click event. Its
+    // M_HandleTap path consumes every tap while the menu is active, so mirror
+    // D_ProcessEvents precedence here before mutating gameplay button state or
+    // asking the browser to recapture the pointer.
+    const menuConsumed = doomstat.menuactive === true;
+    if (D_ShouldCaptureGameplayPress(menuConsumed) !== true) {
+      e.preventDefault?.();
+      return;
+    }
     mouseButtons |= (1 << e.button);
     // Recapture pointer lock only during interactive play. Demo playback
     // shouldn't grab the cursor — the user might want to click out.
-    const ds = await import('./doomstat.js');
-    if (listenerIsActive(generation) !== true) return;
-    if (ds.gamestate === 2 /*GS_FINALE*/) {
+    if (doomstat.gamestate === 2 /*GS_FINALE*/) {
       // Mouse attack remains visible to the per-tic finale command sampler;
       // cast death input is keyboard-only in f_finale.c.
       e.preventDefault?.();
       return;
     }
-    if (ds.gamestate === 0 /*GS_LEVEL*/ && !ds.demoplayback &&
+    if (doomstat.gamestate === 0 /*GS_LEVEL*/ && !doomstat.demoplayback &&
         renderer !== null && document.pointerLockElement !== renderer.domElement) {
       renderer.domElement.requestPointerLock?.();
     }
@@ -189,7 +190,8 @@ async function onMouseDown(e) {
 function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
 
 function onMouseMove(e) {
-    if (renderer !== null && document.pointerLockElement === renderer.domElement) {
+    if (doomstat.menuactive !== true &&
+        renderer !== null && document.pointerLockElement === renderer.domElement) {
       mouseDX += e.movementX;
       mouseDY -= e.movementY;
     }

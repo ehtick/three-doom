@@ -25,6 +25,15 @@ export function D_MouseStrafePressed(mouseButtons) {
   return (mouseButtons & 2) !== 0;
 }
 
+// d_main.c:D_ProcessEvents always offers an event to M_Responder before
+// G_Responder. A press consumed by the menu must therefore never enter the
+// gameplay key/button state. Releases are handled unconditionally by the DOM
+// adapter so a key held before opening the menu cannot stick while a netgame
+// continues ticking behind it.
+export function D_ShouldCaptureGameplayPress(menuConsumed) {
+  return menuConsumed !== true;
+}
+
 export function D_ComputeMovement(input, turnheld) {
   const fast = input.fast === true;
   const forwardStep = fast ? 50 : 25;

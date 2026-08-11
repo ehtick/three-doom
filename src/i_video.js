@@ -404,8 +404,9 @@ export function I_EndRead()   {}
 
 // ---------- Input ----------
 
-// Map a browser KeyboardEvent.code to Doom's keycode space.
-function xlatekey(e) {
+// Map a browser KeyboardEvent.code to Doom's keycode space. d_keyboard uses
+// the same translation when it offers DOM keydowns to M_Responder first.
+export function I_TranslateKey(e) {
   // Doom uses lowercase ASCII for letters and special codes for arrows/F-keys.
   // We map common keys; everything else falls back to e.key.charCodeAt(0).
   const code = e.code;
@@ -442,7 +443,7 @@ function xlatekey(e) {
 }
 
 function onKeyDown(e) {
-  const k = xlatekey(e);
+  const k = I_TranslateKey(e);
   if (k !== 0) {
     D_PostEvent({ type: evtype_t.ev_keydown, data1: k, data2: 0, data3: 0 });
     e.preventDefault();
@@ -450,7 +451,7 @@ function onKeyDown(e) {
 }
 
 function onKeyUp(e) {
-  const k = xlatekey(e);
+  const k = I_TranslateKey(e);
   if (k !== 0) {
     D_PostEvent({ type: evtype_t.ev_keyup, data1: k, data2: 0, data3: 0 });
     e.preventDefault();
