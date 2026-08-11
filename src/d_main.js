@@ -27,6 +27,7 @@ import * as _RB from './r_bsp.js';
 import * as _PMobj from './p_mobj.js';
 import * as _PTick from './p_tick.js';
 import * as _GGame from './g_game.js';
+import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 
 // ---------- Page screen state ----------
 let pagename   = null; // lump name to draw as full-screen page
@@ -389,17 +390,24 @@ async function findIwad() {
   const i = M_CheckParm('-iwad');
   if (i !== 0 && i < myargc - 1) {
     const name = myargv[i + 1];
-    return await fetchWad(name, GameMode_t.indetermined);
+    return await fetchWad(name, true);
   }
-  return await fetchWad('doom1.wad', GameMode_t.shareware);
+  for (const name of D_DEFAULT_IWAD_NAMES) {
+    const wad = await fetchWad(name, false);
+    if (wad !== null) return wad;
+  }
+  I_Error(`No IWAD found (tried ${D_DEFAULT_IWAD_NAMES.join(', ')})`);
 }
 
-async function fetchWad(path, mode) {
+async function fetchWad(path, required) {
   console.log('Fetching', path);
   const r = await fetch(path);
-  if (!r.ok) I_Error('Failed to load ' + path + ': ' + r.status);
+  if (!r.ok) {
+    if (required) I_Error('Failed to load ' + path + ': ' + r.status);
+    return null;
+  }
   const buffer = await r.arrayBuffer();
-  return { name: path, buffer, mode };
+  return { name: path, buffer };
 }
 
 // ---------- D_DoomMain ----------
@@ -415,7 +423,11 @@ export async function D_DoomMain() {
 
   // Locate and load the IWAD.
   const iwad = await findIwad();
-  set_gamemode(iwad.mode === GameMode_t.indetermined ? guessModeFromWad(iwad.buffer) : iwad.mode);
+  const detectedMode = D_GuessGameModeFromWad(iwad.buffer);
+  if (detectedMode === GameMode_t.indetermined) {
+    I_Error('Unable to determine IWAD game mode: no MAP01 or ExM1 map marker found');
+  }
+  set_gamemode(detectedMode);
   W_InitMultipleFiles([{ name: iwad.name, buffer: iwad.buffer }]);
 
   // Defaults / config (localStorage).
@@ -719,10 +731,4 @@ function parseMapParam() {
     }
   }
   return null;
-}
-
-// Best-effort mode guess from IWAD identifier + presence of specific lumps.
-function guessModeFromWad(buffer) {
-  // For now treat unknown as shareware.
-  return GameMode_t.shareware;
 }
