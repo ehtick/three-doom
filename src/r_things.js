@@ -18,6 +18,7 @@ import { patch_t } from './v_video.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { R_MakeIndexedTexture, R_MakeDoomSpriteMaterial } from './r_shader.js';
 import {
+  R_PlayerTranslationFromFlags,
   SPRITE_FF_FULLBRIGHT,
   SPRITE_MF_SHADOW,
   SPRITE_SHADOW_FLICKER,
@@ -344,11 +345,16 @@ export function R_UpdateSprites() {
     // runtime (the powerup wears off), so switch material modes on change.
     const mat = entry.sprite.material;
     const uniforms = mat.uniforms;
+    const playerTranslation = R_PlayerTranslationFromFlags(mo.flags);
+    if (entry._lastPlayerTranslation !== playerTranslation) {
+      uniforms.playerTranslation.value = playerTranslation;
+      entry._lastPlayerTranslation = playerTranslation;
+    }
     if (isShadow !== entry._isShadow) {
       if (isShadow) {
         mat.depthWrite = false; // translucent: don't occlude what's behind it
         uniforms.shadow.value = true;
-        // The default alpha cutoff (0.5) compares against texAlpha * opacity. At
+        // The default alpha cutoff (0.5) compares against texAlpha * opacity.
         // SPRITE_SHADOW_OPACITY (~0.33) puts every silhouette texel below the
         // default 0.5 cutoff and would discard the Spectre entirely. Drop the
         // threshold below the flickering opacity floor so the silhouette survives,

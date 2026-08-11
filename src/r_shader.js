@@ -284,6 +284,7 @@ uniform float extralight;
 uniform float fixedColormap;
 uniform bool fullbright;
 uniform bool shadow;
+uniform float playerTranslation;
 uniform float opacity;
 uniform float alphaCutoff;
 uniform float shadowPaletteIndex;
@@ -314,7 +315,17 @@ void main() {
     row = clamp(startMap - floor(scaleIndex / 2.0), 0.0, 31.0);
   }
 
-  float palIdx = texel.r;
+  float sourceIndex = floor(texel.r * 255.0 + 0.5);
+  if (playerTranslation > 0.5 && sourceIndex >= 112.0 && sourceIndex <= 127.0) {
+    // r_draw.c's translationtables: player 2 green->gray (0x60), player 3
+    // green->brown (0x40), player 4 green->red (0x20). Translation precedes
+    // COLORMAP, matching R_DrawTranslatedColumn.
+    float rampBase = playerTranslation < 1.5
+      ? 96.0
+      : (playerTranslation < 2.5 ? 64.0 : 32.0);
+    sourceIndex = rampBase + (sourceIndex - 112.0);
+  }
+  float palIdx = sourceIndex / 255.0;
   float remap = texture2D(colormap, vec2(palIdx, (row + 0.5) / 34.0)).r;
   vec3 rgb = texture2D(palette, vec2(remap, 0.5)).rgb;
   gl_FragColor = vec4(rgb, alpha);
@@ -335,6 +346,7 @@ export function R_MakeDoomSpriteMaterial(map, { alphaCutoff = 0.5, shadowPalette
       fixedColormap: fixedColormapUniform,
       fullbright:    { value: false },
       shadow:        { value: false },
+      playerTranslation: { value: 0 },
       opacity:       { value: 1 },
       alphaCutoff:   { value: alphaCutoff },
       shadowPaletteIndex: { value: shadowPaletteIndex / 255 },

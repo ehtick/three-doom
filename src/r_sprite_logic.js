@@ -4,6 +4,8 @@
 
 export const SPRITE_FF_FULLBRIGHT = 0x8000;
 export const SPRITE_MF_SHADOW = 0x40000;
+export const SPRITE_MF_TRANSLATION = 0x0c000000;
+export const SPRITE_MF_TRANSSHIFT = 26;
 
 // The WebGL renderer cannot reproduce fuzzcolfunc's screen-space readback, so
 // shadow sprites use one dark PLAYPAL index with translucent shimmer.  Canvas
@@ -47,4 +49,18 @@ export function R_PspriteColormapRow(invisible, fixedColormap, frame, sectorLigh
 export function R_RemapPspriteIndex(sourceIndex, colormapRow, colormaps) {
   if (colormapRow === PSPRITE_SHADOW_ROW) return SPRITE_SHADOW_PALETTE_INDEX;
   return colormaps[colormapRow * 256 + sourceIndex];
+}
+
+// Players 2-4 reuse the green PLAY sprite lumps. Vanilla encodes their colour
+// table in MF_TRANSLATION and changes only the green 0x70..0x7f ramp before
+// the selected COLORMAP is applied.
+const PLAYER_TRANSLATION_BASE = [0x70, 0x60, 0x40, 0x20];
+
+export function R_PlayerTranslationFromFlags(flags) {
+  return (flags & SPRITE_MF_TRANSLATION) >>> SPRITE_MF_TRANSSHIFT;
+}
+
+export function R_TranslatePlayerPaletteIndex(sourceIndex, translation) {
+  if (translation === 0 || sourceIndex < 0x70 || sourceIndex > 0x7f) return sourceIndex;
+  return PLAYER_TRANSLATION_BASE[translation] + (sourceIndex - 0x70);
 }
