@@ -200,7 +200,12 @@ function D_Display() {
       // Automap covers the whole overlay (not letterboxed) — Doom drew it
       // over the entire view-area; we mirror that by painting full-canvas.
       if (_amDrawer !== null) _amDrawer(o, 0, 0, overlay.width, overlay.height);
-      _drawPlayerSprites(o, p, dx, dy, dw, dh);
+      // d_main.c:D_Display only calls R_RenderPlayerView when the automap is
+      // closed. R_DrawPlayerSprites lives inside that render path, so weapon
+      // and muzzle-flash psprites must not be composited over the automap.
+      if (doomstat.automapactive !== true) {
+        _drawPlayerSprites(o, p, dx, dy, dw, dh);
+      }
       // Pickup / item messages + level title (drawn in the letterboxed 320x200 area
       // so positions match the C source's screen coords).
       if (_huDrawer !== null) _huDrawer(o, dx, dy, dw, dh);
