@@ -5,7 +5,7 @@
 import * as I from './i_sound.js';
 import { S_sfx } from './sounds_data.js';
 import { snd_SfxVolume, snd_MusicVolume, set_snd_SfxVolume, set_snd_MusicVolume,
-  gameepisode, gamemap, gamemode, numChannels } from './doomstat.js';
+  gameepisode, gamemap, gamemode, numChannels, players, consoleplayer } from './doomstat.js';
 import { ANG90, ANGLETOFINESHIFT, FINEMASK, finecosine, finesine } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { M_Random } from './m_random.js';
@@ -18,8 +18,6 @@ let channels = [];
 function makeChannels(count) {
   return Array.from({ length: count }, () => ({ sfxinfo: null, origin: null, handle: 0 }));
 }
-
-let _listener = null;
 
 export function S_Init(sfxVolume, musicVolume) {
   I.I_InitSound();
@@ -172,6 +170,25 @@ function S_AdjustSoundParams(listener, source) {
   return { vol, sep, pitch: NORM_PITCH };
 }
 
+// s_sound.c:302-323 reads players[consoleplayer].mo at the instant each sound
+// starts.  Do the same here instead of retaining the listener supplied to the
+// previous S_UpdateSounds call: a demo header can change consoleplayer and
+// start a new level before the new listener reaches that per-tic update.
+export function S_StartSoundParams(origin, volume) {
+  let vol = volume * 8;
+  let sep = NORM_SEP;
+  const listener = players[consoleplayer];
+  const listenerMo = listener?.mo;
+  if (origin !== null && listenerMo !== null && listenerMo !== undefined &&
+      origin !== listenerMo) {
+    const p = S_AdjustSoundParams(listener, origin);
+    if (p === null || p.vol <= 0) return null;
+    vol = p.vol;
+    sep = p.sep;
+  }
+  return { vol, sep };
+}
+
 // sfx ids that bypass the wide pitch perturbation — only itemup and tink stay
 // clean. The chainsaw band (sawup..sawhit) instead gets the narrow ±8 jitter.
 const _SFX_ITEMUP = 32; // sfx_itemup
@@ -215,13 +232,9 @@ export function S_StartSoundAtVolume(origin, sfxid, volume) {
   // s_sound.c:302 — positional sounds re-derive vol/sep from distance; an
   // out-of-range source is dropped BEFORE any M_Random is rolled (vanilla tests
   // audibility only on this path — s_sound.c:817 `return (*vol>0)`).
-  let vol = volume * 8, sep = NORM_SEP;
-  if (origin !== null && _listener !== null && origin !== _listener.mo) {
-    const p = S_AdjustSoundParams(_listener, origin);
-    if (p === null) return;   // out of range
-    vol = p.vol; sep = p.sep;
-    if (vol <= 0) return;
-  }
+  const params = S_StartSoundParams(origin, volume);
+  if (params === null) return; // out of range
+  const { vol, sep } = params;
 
   // s_sound.c:326 — pitch perturbation via M_Random (NOT P_Random: cosmetic
   // jitter must not consume demo-deterministic RNG). The chainsaw band gets ±8;
@@ -249,8 +262,6 @@ export function S_StopSound(origin) {
   // s_sound.c:471 — stop the first channel from this origin, then break.
   S_StopSoundOrigin(origin);
 }
-
-export function S_SetListener(player) { _listener = player; }
 
 // ---------- Music ----------
 import { W_CheckNumForName, W_CacheLumpNum } from './w_wad.js';
@@ -322,7 +333,6 @@ export function S_ResumeSound() {
 // channel; stop channels whose source is now out of range, push updated
 // vol/sep to channels that are still audible.
 export function S_UpdateSounds(listener) {
-  _listener = listener;
   for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     if (c.sfxinfo === null || c.handle === 0) continue;
