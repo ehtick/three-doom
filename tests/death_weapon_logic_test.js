@@ -1,4 +1,7 @@
-import { P_DropWeaponOnDeath } from '../src/p_death_logic.js';
+import {
+  P_DropWeaponOnDeath,
+  P_ShouldStopAutomapOnDeath,
+} from '../src/p_death_logic.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -29,4 +32,14 @@ Deno.test('missing P_DropWeapon wiring fails instead of silently skipping', () =
   }
   assertEquals(error instanceof Error, true, 'missing dependency throws');
   assertEquals(error.message, 'P_DropWeapon dependency was not wired', 'diagnostic');
+});
+
+Deno.test('only the console player death closes an active automap', () => {
+  const local = {};
+  const remote = {};
+  const players = [local, remote];
+  assertEquals(P_ShouldStopAutomapOnDeath(local, players, 0, true), true, 'local active map');
+  assertEquals(P_ShouldStopAutomapOnDeath(remote, players, 0, true), false, 'remote active map');
+  assertEquals(P_ShouldStopAutomapOnDeath(local, players, 0, false), false, 'local inactive map');
+  assertEquals(P_ShouldStopAutomapOnDeath(remote, players, 1, true), true, 'changed console player');
 });

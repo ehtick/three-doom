@@ -11,3 +11,9 @@ export function P_DropWeaponOnDeath(target, dropWeapon) {
   }
   dropWeapon(target.player);
 }
+
+// p_inter.c:708-714 — only the player whose view this client owns exits the
+// automap on death. A remote player's death must not change the local view.
+export function P_ShouldStopAutomapOnDeath(player, players, consoleplayer, automapactive) {
+  return automapactive === true && player === players[consoleplayer];
+}

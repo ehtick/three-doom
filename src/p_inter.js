@@ -18,7 +18,7 @@ import {
   P_KeyStaysInWorld, P_MegasphereAvailable, P_PickupSoundIsLocal,
   P_WeaponAmmoClips, P_WeaponStaysInWorld,
 } from './p_pickup_logic.js';
-import { P_DropWeaponOnDeath } from './p_death_logic.js';
+import { P_DropWeaponOnDeath, P_ShouldStopAutomapOnDeath } from './p_death_logic.js';
 
 // Externals (wired at init).
 let _S = null;
@@ -270,7 +270,10 @@ import { P_SetMobjState, MF_SHOOTABLE, MF_FLOAT, MF_SKULLFLY,
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine, ANG180 } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { FixedMul } from './m_fixed.js';
-import { gameskill, gamemode, players as _players, consoleplayer, netgame, deathmatch } from './doomstat.js';
+import {
+  gameskill, gamemode, players as _players, consoleplayer, netgame, deathmatch,
+  automapactive, set_automapactive,
+} from './doomstat.js';
 
 export function P_KillMobj(source, target) {
   if (target.info === null) return;
@@ -294,6 +297,14 @@ export function P_KillMobj(source, target) {
       if (idx >= 0) target.player.frags[idx]++;
     }
     P_DropWeaponOnDeath(target, _P_DropWeapon);
+    if (P_ShouldStopAutomapOnDeath(
+      target.player, _players, consoleplayer, automapactive,
+    )) {
+      // AM_Stop currently has no state beyond the engine-wide binding. Avoid
+      // a p_inter -> am_map -> p_setup import cycle and publish the same state
+      // transition directly.
+      set_automapactive(false);
+    }
   }
   if (target.info.xdeathstate !== 0 && target.health < -target.info.spawnhealth) {
     P_SetMobjState(target, target.info.xdeathstate);
