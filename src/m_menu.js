@@ -46,6 +46,7 @@ import {
   NETEND, NEWGAME,
 } from './d_englsh.js';
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
+import { M_ALPHA_KEYS, M_FindAlphaItem } from './m_menu_alpha_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { M_ReadThisPlan } from './m_menu_read_logic.js';
@@ -97,13 +98,16 @@ const SAVE_SLOTS = 6;
 const _saveStrings = new Array(SAVE_SLOTS).fill('EMPTY SLOT');
 
 // ---------- Menus ----------
-const CONTINUE_ITEM = { patch: 'M_CONT', label: 'Continue', action: () => M_ClearMenus() };
+const CONTINUE_ITEM = {
+  patch: 'M_CONT', label: 'Continue', alphaKey: M_ALPHA_KEYS.continue,
+  action: () => M_ClearMenus(),
+};
 const MAIN_MENU_ITEMS = {
   continue: CONTINUE_ITEM,
-  newgame: { patch: 'M_NGAME',  label: 'New Game',  action: () => M_NewGame() },
-  options: { patch: 'M_OPTION', label: 'Options',   action: () => pushMenu(OPTIONS_MENU) },
-  readthis: { patch: 'M_RDTHIS', label: 'Read This!', action: () => pushMenu(READ_MENU_1) },
-  quit: { patch: 'M_QUITG',  label: 'Quit',      action: () => M_QuitDOOM() },
+  newgame: { patch: 'M_NGAME', label: 'New Game', alphaKey: M_ALPHA_KEYS.main[0], action: () => M_NewGame() },
+  options: { patch: 'M_OPTION', label: 'Options', alphaKey: M_ALPHA_KEYS.main[1], action: () => pushMenu(OPTIONS_MENU) },
+  readthis: { patch: 'M_RDTHIS', label: 'Read This!', alphaKey: M_ALPHA_KEYS.main[2], action: () => pushMenu(READ_MENU_1) },
+  quit: { patch: 'M_QUITG', label: 'Quit', alphaKey: M_ALPHA_KEYS.main[3], action: () => M_QuitDOOM() },
 };
 // The C menu has Load/Save between Options and Read This. Those browser rows
 // remain intentionally unavailable; mode layout uses the semantic table above
@@ -123,10 +127,10 @@ const MAIN_MENU = { name: 'Main', patch: 'M_DOOM', x: 97, y: 64, items: MAIN_MEN
 // as a WAD patch anyway, so this also keeps the text-fallback font from
 // leaking into the menu.
 const EPISODE_ITEMS = [
-  { patch: 'M_EPI1', label: 'Knee-Deep in the Dead', action: () => _chooseEpisode(1) },
-  { patch: 'M_EPI2', label: 'The Shores of Hell',     action: () => _chooseEpisode(2) },
-  { patch: 'M_EPI3', label: 'Inferno',                action: () => _chooseEpisode(3) },
-  { patch: 'M_EPI4', label: 'Thy Flesh Consumed',     action: () => _chooseEpisode(4) },
+  { patch: 'M_EPI1', label: 'Knee-Deep in the Dead', alphaKey: M_ALPHA_KEYS.episode[0], action: () => _chooseEpisode(1) },
+  { patch: 'M_EPI2', label: 'The Shores of Hell', alphaKey: M_ALPHA_KEYS.episode[1], action: () => _chooseEpisode(2) },
+  { patch: 'M_EPI3', label: 'Inferno', alphaKey: M_ALPHA_KEYS.episode[2], action: () => _chooseEpisode(3) },
+  { patch: 'M_EPI4', label: 'Thy Flesh Consumed', alphaKey: M_ALPHA_KEYS.episode[3], action: () => _chooseEpisode(4) },
 ];
 const EPISODE_MENU = { name: 'Episode', x: 48, y: 63, items: EPISODE_ITEMS };
 // m_menu.c:893-896 — episode heading above the unchanged item rows.
@@ -158,11 +162,11 @@ function M_NewGame() {
 
 // m_menu.c:324-332 — NewDef.lastOn starts on hurtme, not the first skill.
 const SKILL_MENU = { name: 'Skill', x: 48, y: 63, lastOn: 2, items: [
-  { patch: 'M_JKILL', label: "I'm too young to die.", action: () => _chooseSkill(0) },
-  { patch: 'M_ROUGH', label: 'Hey, not too rough.',    action: () => _chooseSkill(1) },
-  { patch: 'M_HURT',  label: 'Hurt me plenty.',        action: () => _chooseSkill(2) },
-  { patch: 'M_ULTRA', label: 'Ultra-Violence.',        action: () => _chooseSkill(3) },
-  { patch: 'M_NMARE', label: 'Nightmare!',             action: () => _chooseSkill(4) },
+  { patch: 'M_JKILL', label: "I'm too young to die.", alphaKey: M_ALPHA_KEYS.skill[0], action: () => _chooseSkill(0) },
+  { patch: 'M_ROUGH', label: 'Hey, not too rough.', alphaKey: M_ALPHA_KEYS.skill[1], action: () => _chooseSkill(1) },
+  { patch: 'M_HURT', label: 'Hurt me plenty.', alphaKey: M_ALPHA_KEYS.skill[2], action: () => _chooseSkill(2) },
+  { patch: 'M_ULTRA', label: 'Ultra-Violence.', alphaKey: M_ALPHA_KEYS.skill[3], action: () => _chooseSkill(3) },
+  { patch: 'M_NMARE', label: 'Nightmare!', alphaKey: M_ALPHA_KEYS.skill[4], action: () => _chooseSkill(4) },
 ]};
 // m_menu.c:867-871 — New Game and Choose Skill headings.
 SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
@@ -174,14 +178,14 @@ SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
 // reserve the lines on which M_DrawOptions draws the screen-size and
 // mouse-sensitivity thermos (one line BELOW each slider's label).
 const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
-  { patch: 'M_ENDGAM', label: 'End Game',          action: () => M_EndGame() },
-  { patch: 'M_MESSG',  label: 'Messages',          action: () => HU_ToggleMessages() },
-  { patch: 'M_DETAIL', label: 'Graphic Detail',    action: () => { _detailLevel ^= 1; } },
-  { patch: 'M_SCRNSZ', label: 'Screen Size',       slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
-  { spacer: true },
-  { patch: 'M_MSENS',  label: 'Mouse Sensitivity', slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
-  { spacer: true },
-  { patch: 'M_SVOL',   label: 'Sound Volume',      action: () => pushMenu(SOUND_MENU) },
+  { patch: 'M_ENDGAM', label: 'End Game', alphaKey: M_ALPHA_KEYS.options[0], action: () => M_EndGame() },
+  { patch: 'M_MESSG', label: 'Messages', alphaKey: M_ALPHA_KEYS.options[1], action: () => HU_ToggleMessages() },
+  { patch: 'M_DETAIL', label: 'Graphic Detail', alphaKey: M_ALPHA_KEYS.options[2], action: () => { _detailLevel ^= 1; } },
+  { patch: 'M_SCRNSZ', label: 'Screen Size', alphaKey: M_ALPHA_KEYS.options[3], slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.options[4] },
+  { patch: 'M_MSENS', label: 'Mouse Sensitivity', alphaKey: M_ALPHA_KEYS.options[5], slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.options[6] },
+  { patch: 'M_SVOL', label: 'Sound Volume', alphaKey: M_ALPHA_KEYS.options[7], action: () => pushMenu(SOUND_MENU) },
 ]};
 // m_menu.c:339-349 options_e — exact row indices. Each thermo sits on the
 // spacer row one line below its slider label, hence the `+ 1`.
@@ -201,10 +205,10 @@ OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {
 // m_menu.c:422-447 — SoundMenu also has spacer rows (sfx_empty1/2) holding the
 // volume thermos (one line below each label).
 const SOUND_MENU = { name: 'Sound', x: 80, y: 64, items: [
-  { patch: 'M_SFXVOL', label: 'Sfx Volume',   slider: true, get: () => sfxVolume,   set: (v) => M_SetSfxVolume(v) },
-  { spacer: true },
-  { patch: 'M_MUSVOL', label: 'Music Volume', slider: true, get: () => musicVolume, set: (v) => M_SetMusicVolume(v) },
-  { spacer: true },
+  { patch: 'M_SFXVOL', label: 'Sfx Volume', alphaKey: M_ALPHA_KEYS.sound[0], slider: true, get: () => sfxVolume, set: (v) => M_SetSfxVolume(v) },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.sound[1] },
+  { patch: 'M_MUSVOL', label: 'Music Volume', alphaKey: M_ALPHA_KEYS.sound[2], slider: true, get: () => musicVolume, set: (v) => M_SetMusicVolume(v) },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.sound[3] },
 ]};
 // m_menu.c:800-809 M_DrawSound — title + sfx/music thermos (width 16).
 SOUND_MENU.draw = (ctx, lx, ly, sx, sy) => {
@@ -218,21 +222,21 @@ SOUND_MENU.draw = (ctx, lx, ly, sx, sy) => {
 // _saveStrings as it changes (e.g. after a save) instead of capturing the
 // initial 'EMPTY SLOT' string forever.
 const LOAD_MENU = { name: 'Load Game', x: 80, y: 54, save: true, items:
-  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', get label() { return _saveStrings[i]; }, action: () => _loadSlot(i) })),
+  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', alphaKey: M_ALPHA_KEYS.slots[i], get label() { return _saveStrings[i]; }, action: () => _loadSlot(i) })),
 };
 const SAVE_MENU = { name: 'Save Game', x: 80, y: 54, save: true, items:
-  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', get label() { return _saveStrings[i]; }, action: () => _saveSlot(i) })),
+  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', alphaKey: M_ALPHA_KEYS.slots[i], get label() { return _saveStrings[i]; }, action: () => _saveSlot(i) })),
 };
 
 const READ_MENU_1 = { name: 'Read This',
   get x() { return M_ReadThisPlan(gamemode).firstX; },
   get y() { return M_ReadThisPlan(gamemode).firstY; },
   get fullscreen() { return M_ReadThisPlan(gamemode).firstPatch; },
-  items: [{ patch: '', label: '', action: () => M_AdvanceReadThis() }],
+  items: [{ patch: '', label: '', alphaKey: 0, action: () => M_AdvanceReadThis() }],
 };
 const READ_MENU_2 = { name: 'Read This 2', x: 330, y: 175,
   get fullscreen() { return M_ReadThisPlan(gamemode).secondPatch; },
-  items: [{ patch: '', label: '', action: () => M_FinishReadThis() }],
+  items: [{ patch: '', label: '', alphaKey: 0, action: () => M_FinishReadThis() }],
 };
 
 // m_menu.c:M_Init changes commercial ReadDef1 into a one-page HELP screen.
@@ -536,7 +540,13 @@ export function M_Responder(ev) {
     M_Back();
     return true;
   }
-  return true;
+  const alphaItem = M_FindAlphaItem(m.items, _selected, key);
+  if (alphaItem !== -1) {
+    _selected = alphaItem;
+    S_StartSound(null, sfx_pstop);
+    return true;
+  }
+  return false;
 }
 
 // Touch/pointer tap handling for mobile. (px,py) are overlay window pixels;
