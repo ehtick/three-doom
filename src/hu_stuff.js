@@ -14,6 +14,10 @@ import { HU_LevelTitle } from './hu_title.js';
 // (vanilla's message_dontfuckwithme).
 export let showMessages = true;
 
+export function HU_SetShowMessages(value) {
+  showMessages = (value | 0) !== 0;
+}
+
 export { HU_FONTSTART, HU_FONTEND, HU_FONTSIZE };
 export const HU_MSGX      = 0;
 export const HU_MSGY      = 0;
@@ -56,7 +60,7 @@ export function HU_QueueMessage(text, force) {
 // m_menu.c:M_ChangeMessages — flip the message display on/off and show the
 // confirmation message itself (forced through the showMessages gate).
 export function HU_ToggleMessages() {
-  showMessages = !showMessages;
+  HU_SetShowMessages(showMessages ? 0 : 1);
   HU_QueueMessage(showMessages ? MSGON : MSGOFF, true);
 }
 

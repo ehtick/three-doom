@@ -1,6 +1,7 @@
 // Browser-backed subset of linuxdoom m_misc.c's defaults[] table.
 
 import * as doomstat from './doomstat.js';
+import { HU_SetShowMessages, showMessages } from './hu_stuff.js';
 import { M_RegisterDefault } from './m_misc.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 import { set_usegamma, usegamma } from './v_video.js';
@@ -22,6 +23,10 @@ export function M_RegisterDoomDefaults() {
     get: () => doomstat.snd_MusicVolume,
     set: (value) => doomstat.set_snd_MusicVolume(value | 0),
   }, 8);
+  M_RegisterDefault('show_messages', {
+    get: () => showMessages,
+    set: (value) => HU_SetShowMessages(value),
+  }, 1);
   M_RegisterDefault('usegamma', {
     get: () => usegamma,
     set: (value) => set_usegamma(value | 0),

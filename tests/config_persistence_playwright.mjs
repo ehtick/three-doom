@@ -40,12 +40,14 @@ try {
   const first = await openGame();
   const initial = await first.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
+    const hu = await import('/src/hu_stuff.js');
     const video = await import('/src/v_video.js');
     const view = await import('/src/r_view.js');
     return {
       mouseSensitivity: doomstat.mouseSensitivity,
       sfxVolume: doomstat.snd_SfxVolume,
       musicVolume: doomstat.snd_MusicVolume,
+      showMessages: hu.showMessages,
       usegamma: video.usegamma,
       screenblocks: view.R_GetScreenblocks(),
     };
@@ -53,11 +55,13 @@ try {
   const saved = await first.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
     const system = await import('/src/i_system.js');
+    const hu = await import('/src/hu_stuff.js');
     const video = await import('/src/v_video.js');
     const view = await import('/src/r_view.js');
     doomstat.set_mouseSensitivity(8);
     doomstat.set_snd_SfxVolume(12);
     doomstat.set_snd_MusicVolume(3);
+    hu.HU_SetShowMessages(0);
     video.set_usegamma(3);
     view.R_SetViewSize(10);
     system.I_Quit();
@@ -68,12 +72,14 @@ try {
   const second = await openGame();
   const reloaded = await second.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
+    const hu = await import('/src/hu_stuff.js');
     const video = await import('/src/v_video.js');
     const view = await import('/src/r_view.js');
     const value = {
       mouseSensitivity: doomstat.mouseSensitivity,
       sfxVolume: doomstat.snd_SfxVolume,
       musicVolume: doomstat.snd_MusicVolume,
+      showMessages: hu.showMessages,
       usegamma: video.usegamma,
       screenblocks: view.R_GetScreenblocks(),
       viewport: [doomstat.scaledviewwidth, doomstat.viewheight],
@@ -86,14 +92,16 @@ try {
 
   const failures = [];
   if (initial.mouseSensitivity !== 5 || initial.sfxVolume !== 8 ||
-      initial.musicVolume !== 8 || initial.usegamma !== 0 || initial.screenblocks !== 9) {
+      initial.musicVolume !== 8 || initial.showMessages !== true ||
+      initial.usegamma !== 0 || initial.screenblocks !== 9) {
     failures.push(`reference defaults mismatch: ${JSON.stringify(initial)}`);
   }
-  if (saved !== 'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nusegamma\t\t3\nscreenblocks\t\t10') {
+  if (saved !== 'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nshow_messages\t\t0\nusegamma\t\t3\nscreenblocks\t\t10') {
     failures.push(`quit save mismatch: ${JSON.stringify(saved)}`);
   }
   if (reloaded.mouseSensitivity !== 8 || reloaded.sfxVolume !== 12 ||
-      reloaded.musicVolume !== 3 || reloaded.usegamma !== 3 ||
+      reloaded.musicVolume !== 3 || reloaded.showMessages !== false ||
+      reloaded.usegamma !== 3 ||
       reloaded.screenblocks !== 10 || JSON.stringify(reloaded.viewport) !== '[320,168]' ||
       reloaded.defaults !== saved) {
     failures.push(`reload mismatch: ${JSON.stringify(reloaded)}`);
