@@ -180,22 +180,23 @@ SKILL_MENU.draw = (ctx, lx, ly, sx, sy) => {
   _drawPatchDoom(ctx, 'M_SKILL', 54, 38, lx, ly, sx, sy);
 };
 
-// m_menu.c:339-372 — the two `status:-1` spacer rows (option_empty1/2)
+// The browser menu intentionally omits the source OptionsDef "End Game" row;
+// F7 still exposes that flow as a closed-menu shortcut. The remaining rows are
+// compacted upward, while the two `status:-1` spacer rows (option_empty1/2)
 // reserve the lines on which M_DrawOptions draws the screen-size and
 // mouse-sensitivity thermos (one line BELOW each slider's label).
 const OPTIONS_MENU = { name: 'Options', x: 60, y: 37, items: [
-  { patch: 'M_ENDGAM', label: 'End Game', alphaKey: M_ALPHA_KEYS.options[0], action: () => M_EndGame() },
-  { patch: 'M_MESSG', label: 'Messages', alphaKey: M_ALPHA_KEYS.options[1], action: () => HU_ToggleMessages() },
-  { patch: 'M_DETAIL', label: 'Graphic Detail', alphaKey: M_ALPHA_KEYS.options[2], action: () => M_ChangeDetail() },
-  { patch: 'M_SCRNSZ', label: 'Screen Size', alphaKey: M_ALPHA_KEYS.options[3], slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
-  { spacer: true, alphaKey: M_ALPHA_KEYS.options[4] },
-  { patch: 'M_MSENS', label: 'Mouse Sensitivity', alphaKey: M_ALPHA_KEYS.options[5], slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
-  { spacer: true, alphaKey: M_ALPHA_KEYS.options[6] },
-  { patch: 'M_SVOL', label: 'Sound Volume', alphaKey: M_ALPHA_KEYS.options[7], action: () => pushMenu(SOUND_MENU) },
+  { patch: 'M_MESSG', label: 'Messages', alphaKey: M_ALPHA_KEYS.options[0], action: () => HU_ToggleMessages() },
+  { patch: 'M_DETAIL', label: 'Graphic Detail', alphaKey: M_ALPHA_KEYS.options[1], action: () => M_ChangeDetail() },
+  { patch: 'M_SCRNSZ', label: 'Screen Size', alphaKey: M_ALPHA_KEYS.options[2], slider: true, get: () => getScreenSize(), set: (v) => M_SizeDisplay(v > getScreenSize() ? 1 : 0) },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.options[3] },
+  { patch: 'M_MSENS', label: 'Mouse Sensitivity', alphaKey: M_ALPHA_KEYS.options[4], slider: true, get: () => mouseSensitivity, set: (v) => { set_mouseSensitivity(Math.max(0, Math.min(9, v | 0))); } },
+  { spacer: true, alphaKey: M_ALPHA_KEYS.options[5] },
+  { patch: 'M_SVOL', label: 'Sound Volume', alphaKey: M_ALPHA_KEYS.options[6], action: () => pushMenu(SOUND_MENU) },
 ]};
-// m_menu.c:339-349 options_e — exact row indices. Each thermo sits on the
-// spacer row one line below its slider label, hence the `+ 1`.
-const opt_messages = 1, opt_detail = 2, opt_scrnsize = 3, opt_mousesens = 5;
+// Compacted row indices. Each thermo sits on the spacer row one line below its
+// slider label, hence the `+ 1`.
+const opt_messages = 0, opt_detail = 1, opt_scrnsize = 2, opt_mousesens = 4;
 function M_ChangeDetail() { _detailLevel ^= 1; }
 // m_menu.c:951-966 M_DrawOptions — title, on/off + hi/lo indicators, thermos.
 OPTIONS_MENU.draw = (ctx, lx, ly, sx, sy) => {

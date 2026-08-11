@@ -121,9 +121,9 @@ try {
     key(KEY_ESCAPE);
     key('o'.charCodeAt(0));
     key(KEY_ENTER);
-    const detailLow = compareOpaquePatch(drawMenu(), 'M_GDLOW', 235, 69);
+    const detailLow = compareOpaquePatch(drawMenu(), 'M_GDLOW', 235, 53);
     const activeF5Consumed = key(KEY_F5);
-    const detailStillLow = compareOpaquePatch(drawMenu(), 'M_GDLOW', 235, 69);
+    const detailStillLow = compareOpaquePatch(drawMenu(), 'M_GDLOW', 235, 53);
     key(KEY_ESCAPE);
 
     // F8 changes the setting first and queues the exact forced confirmation.

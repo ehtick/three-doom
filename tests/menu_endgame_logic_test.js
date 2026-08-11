@@ -33,18 +33,21 @@ Deno.test('End Game integration uses exact messages, input flags, sound, and tit
   }
 });
 
-Deno.test('Options rows and thermometer indices match OptionsDef', async () => {
+Deno.test('Options menu omits End Game and compacts the remaining rows', async () => {
   const source = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
   const start = source.indexOf('const OPTIONS_MENU');
   const end = source.indexOf('// m_menu.c:422-447', start);
   const options = source.slice(start, end);
+  if (options.includes("{ patch: 'M_ENDGAM'")) {
+    throw new Error('Options menu still exposes End Game');
+  }
   for (const fragment of [
-    "{ patch: 'M_ENDGAM'",
-    'const opt_messages = 1',
-    'opt_detail = 2',
-    'opt_scrnsize = 3',
-    'opt_mousesens = 5',
+    "{ patch: 'M_MESSG'",
+    'const opt_messages = 0',
+    'opt_detail = 1',
+    'opt_scrnsize = 2',
+    'opt_mousesens = 4',
   ]) {
-    if (!options.includes(fragment)) throw new Error(`missing OptionsDef fragment: ${fragment}`);
+    if (!options.includes(fragment)) throw new Error(`missing compact Options fragment: ${fragment}`);
   }
 });

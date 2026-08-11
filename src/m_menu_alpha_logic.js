@@ -7,7 +7,8 @@ export const M_ALPHA_KEYS = Object.freeze({
   main: Object.freeze([code('n'), code('o'), code('r'), code('q')]),
   episode: Object.freeze([code('k'), code('t'), code('i'), code('t')]),
   skill: Object.freeze([code('i'), code('h'), code('h'), code('u'), code('n')]),
-  options: Object.freeze([code('e'), code('m'), code('g'), code('s'), 0, code('m'), 0, code('s')]),
+  // The browser Options menu deliberately omits the source End Game row.
+  options: Object.freeze([code('m'), code('g'), code('s'), 0, code('m'), 0, code('s')]),
   sound: Object.freeze([code('s'), 0, code('m'), 0]),
   slots: Object.freeze([code('1'), code('2'), code('3'), code('4'), code('5'), code('6')]),
 });

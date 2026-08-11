@@ -96,15 +96,16 @@ try {
     key(KEY_ENTER); // Options.
 
     key(letter('m'));
-    const optionsM1 = cursor(60, 37, 1);
+    const optionsM4 = cursor(60, 37, 4);
     key(letter('m'));
-    const optionsM5 = cursor(60, 37, 5);
+    const optionsM0 = cursor(60, 37, 0);
     key(letter('m'));
-    const optionsMWrap = cursor(60, 37, 1);
+    const optionsMWrap = cursor(60, 37, 4);
     key(letter('s'));
-    const optionsS3 = cursor(60, 37, 3);
+    const optionsS6 = cursor(60, 37, 6);
     key(letter('s'));
-    const optionsS7 = cursor(60, 37, 7);
+    const optionsS2 = cursor(60, 37, 2);
+    key(letter('s'));
     key(KEY_ENTER); // Sound.
     key(letter('m'));
     const soundM = cursor(80, 64, 2);
@@ -132,11 +133,11 @@ try {
       episodeTWrap,
       skillHWrap,
       skillHNext,
-      optionsM1,
-      optionsM5,
+      optionsM4,
+      optionsM0,
       optionsMWrap,
-      optionsS3,
-      optionsS7,
+      optionsS6,
+      optionsS2,
       soundM,
       soundS,
       continueNewGame,

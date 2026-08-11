@@ -141,7 +141,6 @@ try {
     key('keydown', 'ArrowDown', 'ArrowDown');
     key('keydown', 'ArrowDown', 'ArrowDown');
     key('keydown', 'ArrowDown', 'ArrowDown');
-    key('keydown', 'ArrowDown', 'ArrowDown');
     const sensitivityBefore = doomstat.mouseSensitivity;
     key('keydown', 'ArrowLeft', 'ArrowLeft');
     const sensitivityAfter = doomstat.mouseSensitivity;

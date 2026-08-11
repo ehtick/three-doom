@@ -1,4 +1,4 @@
-// Real-WAD Options layout and M_EndGame -> D_StartTitle lifecycle checks.
+// Real-WAD compact Options layout and F7 M_EndGame lifecycle checks.
 
 import { createRequire } from 'node:module';
 
@@ -26,7 +26,7 @@ try {
 
   const result = await page.evaluate(async () => {
     const doomstat = await import('/src/doomstat.js');
-    const { KEY_DOWNARROW, KEY_ENTER } = await import('/src/doomdef.js');
+    const { KEY_DOWNARROW, KEY_ENTER, KEY_F7 } = await import('/src/doomdef.js');
     const { gameaction_t } = await import('/src/d_event.js');
     const hu = await import('/src/hu_stuff.js');
     const menu = await import('/src/m_menu.js');
@@ -72,38 +72,35 @@ try {
       key(KEY_ENTER);
     }
 
-    // Full 320x200 comparison against an independent OptionsDef transcription.
+    // Full 320x200 comparison against the compact browser Options menu.
     openOptions();
     const actual = makeCanvas();
     menu.M_Drawer(actual.getContext('2d'), 0, 0, 320, 200);
     const expected = makeCanvas();
     const ctx = expected.getContext('2d');
     patch(ctx, 'M_OPTTTL', 108, 15);
-    patch(ctx, 'M_GDHIGH', 235, 69);
-    patch(ctx, hu.showMessages ? 'M_MSGON' : 'M_MSGOFF', 180, 53);
-    thermo(ctx, 60, 133, 10, doomstat.mouseSensitivity);
-    thermo(ctx, 60, 101, 9, menu.getScreenblocks() - 3);
+    patch(ctx, 'M_GDHIGH', 235, 53);
+    patch(ctx, hu.showMessages ? 'M_MSGON' : 'M_MSGOFF', 180, 37);
+    thermo(ctx, 60, 117, 10, doomstat.mouseSensitivity);
+    thermo(ctx, 60, 85, 9, menu.getScreenblocks() - 3);
     const items = [
-      ['M_ENDGAM', 0], ['M_MESSG', 1], ['M_DETAIL', 2], ['M_SCRNSZ', 3],
-      ['M_MSENS', 5], ['M_SVOL', 7],
+      ['M_MESSG', 0], ['M_DETAIL', 1], ['M_SCRNSZ', 2],
+      ['M_MSENS', 4], ['M_SVOL', 6],
     ];
     for (const [name, row] of items) patch(ctx, name, 60, 37 + row * 16);
     patch(ctx, 'M_SKULL1', 28, 32);
     const optionsMismatch = mismatchCount(actual, expected);
 
-    // No user game: refuse in place (M_EndGame's oof path), with no message.
+    // End Game remains available only through the closed-menu F7 shortcut.
+    menu.M_ClearMenus();
     doomstat.set_usergame(false);
-    const inactiveConsumed = key(KEY_ENTER);
-    const inactiveStayedOpen = doomstat.menuactive;
-    const inactiveCanvas = makeCanvas();
-    menu.M_Drawer(inactiveCanvas.getContext('2d'), 0, 0, 320, 200);
-    const inactiveMismatch = mismatchCount(inactiveCanvas, expected);
+    const inactiveConsumed = key(KEY_F7);
+    const inactiveStayedClosed = doomstat.menuactive === false;
 
     // Active netgame: informational NETEND accepts an arbitrary key.
     doomstat.set_usergame(true);
     doomstat.set_netgame(true);
-    openOptions();
-    const netConsumed = key(KEY_ENTER);
+    const netConsumed = key(KEY_F7);
     const netMessageOpen = doomstat.menuactive;
     const netDismissed = key(0x78 /*x*/);
     const netClosed = doomstat.menuactive === false;
@@ -111,15 +108,13 @@ try {
     // Active single-player: ENDGAME is a confirmation; N closes without
     // leaving the level, while Y schedules and enters the title attract loop.
     doomstat.set_netgame(false);
-    openOptions();
-    const confirmConsumed = key(KEY_ENTER);
+    const confirmConsumed = key(KEY_F7);
     const unsupported = key(KEY_ENTER);
     const confirmStillOpen = doomstat.menuactive;
     const declined = key(0x6e /*n*/);
     const declinedStayedInGame = doomstat.usergame && doomstat.gamestate === 0;
 
-    openOptions();
-    key(KEY_ENTER);
+    key(KEY_F7);
     doomstat.set_gameaction(gameaction_t.ga_completed);
     const accepted = key(0x79 /*y*/);
     const closedImmediately = doomstat.menuactive === false;
@@ -137,7 +132,7 @@ try {
     menu.M_ClearMenus();
     return {
       optionsMismatch,
-      inactiveConsumed, inactiveStayedOpen, inactiveMismatch,
+      inactiveConsumed, inactiveStayedClosed,
       netConsumed, netMessageOpen, netDismissed, netClosed,
       confirmConsumed, unsupported, confirmStillOpen, declined,
       declinedStayedInGame, accepted, closedImmediately, title,
@@ -146,7 +141,7 @@ try {
 
   const failures = [];
   if (result.optionsMismatch !== 0) failures.push(`Options pixels: ${result.optionsMismatch}`);
-  if (!result.inactiveConsumed || !result.inactiveStayedOpen || result.inactiveMismatch !== 0) {
+  if (!result.inactiveConsumed || !result.inactiveStayedClosed) {
     failures.push(`inactive route: ${JSON.stringify(result)}`);
   }
   if (!result.netConsumed || !result.netMessageOpen || !result.netDismissed || !result.netClosed) {
