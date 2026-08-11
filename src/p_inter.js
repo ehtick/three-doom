@@ -6,7 +6,7 @@
 import { mobj_t, MF_SPECIAL, MF_DROPPED, MF_NOTDMATCH } from './p_mobj.js';
 import { MT_MISC0, MT_MISC1, MT_MISC2, MT_MISC3, MT_MISC4, MT_MISC5, MT_MISC6,
          MT_MISC7, MT_MISC8, MT_MISC9, MT_MISC10, MT_MISC11, MT_MISC12,
-         MT_INV, MT_MISC13, MT_MISC14, MT_MISC15, MT_MISC16, MT_MEGA,
+         MT_INV, MT_MISC13, MT_INS, MT_MISC14, MT_MISC15, MT_MISC16, MT_MEGA,
          MT_CLIP, MT_MISC17, MT_MISC18, MT_MISC19, MT_MISC20, MT_MISC21,
          MT_MISC22, MT_MISC23, MT_MISC24, MT_MISC25, MT_CHAINGUN, MT_MISC26,
          MT_MISC27, MT_MISC28, MT_SHOTGUN,
@@ -198,6 +198,9 @@ export function P_TouchSpecialThing(special, toucher) {
       player.message = 'Berserk!';
       if (player.readyweapon !== weapontype_t.wp_fist) player.pendingweapon = weapontype_t.wp_fist;
       sound = 93 /*sfx_getpow*/; break;
+    case MT_INS:
+      if (P_GivePower(player, pw_invisibility) === false) return;
+      player.message = 'Partial Invisibility'; sound = 93 /*sfx_getpow*/; break;
     case MT_MISC14:
       if (P_GivePower(player, pw_ironfeet) === false) return;
       player.message = 'Radiation Shielding Suit'; sound = 93 /*sfx_getpow*/; break;
