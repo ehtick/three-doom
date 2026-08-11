@@ -11,8 +11,11 @@ function clampMove(value) {
   return Math.max(-MAXPLMOVE, Math.min(MAXPLMOVE, value));
 }
 
-function clampAngle(value) {
-  return Math.max(-0x8000, Math.min(0x7fff, value));
+// ticcmd_t.angleturn is a signed short. C narrows each accumulated turn into
+// that field; it does not saturate it. A single modulo-16-bit narrowing after
+// the additive contributions is equivalent and preserves demo byte semantics.
+function narrowAngle(value) {
+  return (value << 16) >> 16;
 }
 
 export function D_ComputeMovement(input, turnheld) {
@@ -47,6 +50,6 @@ export function D_ComputeMovement(input, turnheld) {
   return {
     forwardmove: clampMove(forward),
     sidemove: clampMove(side),
-    angleturn: clampAngle(angle),
+    angleturn: narrowAngle(angle),
   };
 }

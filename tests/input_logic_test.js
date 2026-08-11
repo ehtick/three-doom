@@ -37,12 +37,27 @@ Deno.test('right mouse and vertical mouse movement move forward', () => {
   );
 });
 
-Deno.test('movement and mouse turning use vanilla clamps and acceleration', () => {
+Deno.test('movement clamps while angleturn narrows to vanilla signed-short storage', () => {
   assertMovement(
     { fast: true, forward: true, mouseForward: true, strafeRight: true,
       turnRight: true, mouseX: 5000 },
     6,
-    { forwardmove: 50, sidemove: 40, angleturn: -32768 },
-    'fast/clamped movement',
+    { forwardmove: 50, sidemove: 40, angleturn: 24256 },
+    'fast/clamped movement and wrapped turn',
+  );
+});
+
+Deno.test('angleturn wraps across both signed-short boundaries', () => {
+  assertMovement(
+    { mouseX: 4097 },
+    0,
+    { forwardmove: 0, sidemove: 0, angleturn: 32760 },
+    'negative overflow',
+  );
+  assertMovement(
+    { mouseX: -4097 },
+    0,
+    { forwardmove: 0, sidemove: 0, angleturn: -32760 },
+    'positive overflow',
   );
 });
