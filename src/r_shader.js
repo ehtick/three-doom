@@ -8,10 +8,14 @@
 //
 // The 3D port keeps wall / flat / sprite textures as 8-bit palette indices
 // (R8) plus a 1-bit alpha mask (G8), and a fragment shader reproduces the
-// COLORMAP lookup. View-space depth stands in for vanilla's per-column
-// rw_scale-based j index — they're proportional in a perspective camera.
+// COLORMAP lookup. View-space depth gives the same projected wall scale and
+// plane z-distance indices that vanilla used to select its integer LUTs.
 
 import * as THREE from 'three';
+import {
+  LIGHTLEVELS, MAXLIGHTSCALE, MAXLIGHTZ, NUMCOLORMAPS, DISTMAP,
+  LIGHT_PROJECTION, WALL_SCALE_NUMERATOR,
+} from './r_light_logic.js';
 
 // Singletons — built lazily from the WAD's PLAYPAL + COLORMAP lumps.
 let _paletteTex = null;
@@ -136,13 +140,12 @@ void main() {
 }
 `;
 
-// Fragment shader applies the vanilla scalelight formula:
-//   lightIdx = clamp((lightlevel >> 4) + extralight, 0, 15)
-//   startMap = (15 - lightIdx) * 4
-//   row      = clamp(startMap + distance adjustment, 0, 31)
-// distMap stands in for vanilla's j (the screen-scale index). We pick a
-// per-unit scale that matches vanilla's perceived fall-off in a typical
-// Doom room. Final colour is paletteTex[colormapTex[texIdx, row]].
+// Fragment shader applies vanilla's two distinct integer light-table paths.
+// Walls and masked midtextures select scalelight[light][rw_scale >> 12];
+// planes select zlight[light][distance >> LIGHTZSHIFT].  With the port's
+// fixed 320-wide/90-degree reference projection these indices can be derived
+// exactly from perpendicular view depth.  Final colour is
+// paletteTex[colormapTex[texIdx, row]].
 //
 // `masked` materials enable the alpha-discard branch for grates / fences.
 const FRAG_SHADER = /* glsl */ `
@@ -152,6 +155,7 @@ uniform sampler2D colormap;
 uniform float extralight;
 uniform float fixedColormap;     // -1 = use shading, >=0 = force this row (invuln=32)
 uniform bool masked;
+uniform bool planeLighting;
 
 varying vec2 vUv;
 varying vec3 vColor;
@@ -169,15 +173,27 @@ void main() {
     // Invuln / light-amp visor: shader sees a fixed colormap row.
     row = fixedColormap;
   } else {
-    // r_main.c R_InitLightTables — startMap is vanilla's *far-distance*
-    // darkness for the sector. Close is brighter by up to MAXLIGHTSCALE/4
-    // (~ 12 rows). Vanilla: level = startMap - j/4 with j=0 (far) yielding
-    // startMap and j=47 (close) yielding startMap-11.75. We replace -j/4
-    // with (distMap - 12); distMap saturates to ~12 at far range.
-    float lightIdx = clamp(vColor.r + extralight, 0.0, 15.0);
-    float startMap = (15.0 - lightIdx) * 4.0;          // 0..60 (vanilla far-end darkness)
-    float distMap  = clamp(vViewDepth * (12.0 / 1024.0), 0.0, 12.0);
-    row = clamp(startMap + distMap - 12.0, 0.0, 31.0);
+    float lightIdx = floor(clamp(vColor.r + extralight, 0.0, ${LIGHTLEVELS - 1}.0));
+    float startMap = (${LIGHTLEVELS - 1}.0 - lightIdx) * 4.0;
+
+    if (planeLighting) {
+      // R_MapPlane: index = distance >> LIGHTZSHIFT.  2^20 fixed-point
+      // units are 16 world units.  R_InitLightTables then computes
+      // scale = (SCREENWIDTH/2)/(index+1), and level = startMap-scale/DISTMAP.
+      float zIndex = min(floor(max(vViewDepth, 0.0) / 16.0), ${MAXLIGHTZ - 1}.0);
+      float zScale = floor(${LIGHT_PROJECTION}.0 / (zIndex + 1.0));
+      row = clamp(startMap - floor(zScale / ${DISTMAP}.0), 0.0, ${NUMCOLORMAPS - 1}.0);
+    } else {
+      // R_RenderSegLoop/R_RenderMaskedSegRange: rw_scale is
+      // (160/depth)*FRACUNIT, so rw_scale >> LIGHTSCALESHIFT is
+      // floor(2560/depth), clamped to MAXLIGHTSCALE-1.  The full-width
+      // scalelight table subtracts integer scaleIndex/DISTMAP.
+      float scaleIndex = min(
+        floor(${WALL_SCALE_NUMERATOR}.0 / max(vViewDepth, 0.0000152587890625)),
+        ${MAXLIGHTSCALE - 1}.0
+      );
+      row = clamp(startMap - floor(scaleIndex / ${DISTMAP}.0), 0.0, ${NUMCOLORMAPS - 1}.0);
+    }
   }
 
   // Sample the colormap remap: x = palIdx, y = row/(rows-1) for 34 rows.
@@ -192,7 +208,7 @@ void main() {
 // `masked=true` enables alphaTest discard for grates/fences.
 // `fixedColormap=0` forces the fullbright row (sky path: r_plane.c:396-405
 // "Sky is allways drawn full bright, no colormaps needed").
-export function R_MakeDoomMaterial(map, { masked = false, side = THREE.FrontSide, fixedColormap = -1, depthWrite = true } = {}) {
+export function R_MakeDoomMaterial(map, { masked = false, plane = false, side = THREE.FrontSide, fixedColormap = -1, depthWrite = true } = {}) {
   if (_paletteTex === null || _colormapTex === null) {
     throw new Error('R_MakeDoomMaterial called before R_ShaderInit');
   }
@@ -204,6 +220,7 @@ export function R_MakeDoomMaterial(map, { masked = false, side = THREE.FrontSide
       extralight:    extralightUniform,
       fixedColormap: fixedColormap >= 0 ? { value: fixedColormap } : fixedColormapUniform,
       masked:        { value: masked },
+      planeLighting: { value: plane },
     },
     vertexShader:   VERT_SHADER,
     fragmentShader: FRAG_SHADER,

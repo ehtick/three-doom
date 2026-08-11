@@ -177,7 +177,7 @@ export function R_BuildPlanes(scene) {
       g.setIndex(b.indices);
       g.computeVertexNormals();
       const map = R_GetFlatTexture(flatnum);
-      const mat = R_MakeDoomMaterial(map, { side: THREE.FrontSide });
+      const mat = R_MakeDoomMaterial(map, { plane: true, side: THREE.FrontSide });
       const mesh = new THREE.Mesh(g, mat);
       mesh.frustumCulled = false;
       // Wire each bucket back to its mesh so updates can hit the right geometry.
