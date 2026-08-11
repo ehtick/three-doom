@@ -389,10 +389,6 @@ async function D_DoomLoop() {
     _ticAccum = clock.remainder;
     let dueTics = clock.due;
     while (dueTics-- > 0) {
-      // d_net.c:746 — gametic is incremented once per tic, before any per-tic
-      // logic runs. Used for ambient sound scheduling, levelstarttic offsets,
-      // demo timing, etc.
-      doomstat.set_gametic(doomstat.gametic + 1);
       // d_main.c:380-383 order — D_DoAdvanceDemo runs BEFORE G_Ticker so cases
       // 1/3/5 (G_DeferedPlayDemo) queue gameaction=ga_playdemo and G_Ticker
       // dispatches it INSIDE the same tic. With the matching G_DoLoadLevel
@@ -421,28 +417,31 @@ async function D_DoomLoop() {
             p === undefined || p === null || p.mo === null ||
             activePlayers.some((activePlayer) =>
               activePlayer.mo === null || activePlayer.mo === undefined)) {
-          continue;
-        }
-        if (doomstat.demoplayback && _gReadDemoCmd !== null) {
-          // G_ReadDemoTiccmd ends playback at the marker, but vanilla still
-          // completes that G_Ticker pass with the commands already present.
-          G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
+          // Loading is synchronous in vanilla, so this transient exists only
+          // in the browser port. Consume the scheduler tic without running an
+          // incomplete player topology; gametic still advances below.
         } else {
-          D_KeyboardInput.buildCmd(p);
+          if (doomstat.demoplayback && _gReadDemoCmd !== null) {
+            // G_ReadDemoTiccmd ends playback at the marker, but vanilla still
+            // completes that G_Ticker pass with the commands already present.
+            G_ReadDemoTiccmds(activePlayers, _gReadDemoCmd);
+          } else {
+            D_KeyboardInput.buildCmd(p);
+          }
+          // g_game.c:697 — process BT_SPECIAL (pause) before P_PlayerThink clears it.
+          if (_gCheckSpecial !== null) {
+            for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
+          }
+          _pTicker();
+          if (_amTicker !== null) _amTicker();
+          if (_stTicker !== null) _stTicker();
+          if (_huTicker !== null) _huTicker();
+          if (_stPalette !== null) _stPalette();
+          // Re-attenuate live sounds based on the listener's position.
+          if (_sUpdate !== null) _sUpdate(p);
+          // Animate wall/flat textures every tic.
+          if (_animTextures !== null) _animTextures(doomstat.leveltime);
         }
-        // g_game.c:697 — process BT_SPECIAL (pause) before P_PlayerThink clears it.
-        if (_gCheckSpecial !== null) {
-          for (const activePlayer of activePlayers) _gCheckSpecial(activePlayer);
-        }
-        _pTicker();
-        if (_amTicker !== null) _amTicker();
-        if (_stTicker !== null) _stTicker();
-        if (_huTicker !== null) _huTicker();
-        if (_stPalette !== null) _stPalette();
-        // Re-attenuate live sounds based on the listener's position.
-        if (_sUpdate !== null) _sUpdate(p);
-        // Animate wall/flat textures every tic.
-        if (_animTextures !== null) _animTextures(doomstat.leveltime);
       } else if (gamestate === gamestate_t.GS_INTERMISSION && _wiTicker !== null) {
         // Drive the intermission counters + 'press key to continue' timer.
         _wiTicker();
@@ -452,6 +451,10 @@ async function D_DoomLoop() {
       }
       // I_Quit can synchronously dispatch doom:quit from inside a ticker.
       if (D_DoomRafLoop.active(loopToken) !== true) return;
+      // d_net.c:735-746 — D_DoAdvanceDemo, M_Ticker, and G_Ticker (which
+      // contains the state-specific tickers in vanilla) all observe the
+      // current gametic. Advance it only after the completed tic.
+      doomstat.set_gametic(doomstat.gametic + 1);
     }
     if (D_DoomRafLoop.active(loopToken) !== true) return;
     D_Display();
