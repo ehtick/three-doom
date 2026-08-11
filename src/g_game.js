@@ -23,7 +23,9 @@ import { states, mobjinfo, S_SARG_RUN1, S_SARG_PAIN2,
 import { S_PauseSound, S_ResumeSound } from './s_sound.js';
 import { F_StartFinale } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
+import { G_SecretExitAvailable } from './g_game_logic.js';
 import { I_Error } from './i_system.js';
+import { W_CheckNumForName } from './w_wad.js';
 import {
   G_DeathMatchSpawnPlayer as G_RunDeathMatchSpawnPlayer,
   G_DoReborn as G_RunDoReborn,
@@ -653,13 +655,10 @@ export function G_ExitLevel() {
   set_secretexit(false);
   set_gameaction(gameaction_t.ga_completed);
 }
-// g_game.c:G_SecretExitLevel — vanilla uses a sneaky shareware-doom check
-// that pretends the secret exit is broken in v1.0; we just set the flag.
+// g_game.c:G_SecretExitLevel — the censored commercial IWAD has no Wolf3D
+// maps, so its secret exits fall back to normal exits.
 export function G_SecretExitLevel() {
-  // Shareware doom v1.0 didn't have a working secret exit on E1M3 — the
-  // C source emulates that bug by remapping the secret-exit type to a
-  // normal exit on shareware. We don't ship that bug; secret exits work.
-  set_secretexit(true);
+  set_secretexit(G_SecretExitAvailable(gamemode, W_CheckNumForName));
   set_gameaction(gameaction_t.ga_completed);
 }
 // Expose to non-importing call sites (p_spec.js, p_enemy.js) to avoid cycles.
