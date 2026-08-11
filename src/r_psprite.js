@@ -10,14 +10,23 @@
 import { sprnames, states } from './info.js';
 import { sprites } from './r_things.js';
 import { W_CacheLumpNum } from './w_wad.js';
-import { firstspritelump } from './r_data.js';
+import { colormaps, firstspritelump } from './r_data.js';
 import { patch_t, V_CreatePaletteCanvasInfo } from './v_video.js';
-import { SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
+import { powertype_t, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
+import {
+  PSPRITE_SHADOW_ROW,
+  R_IsPspriteInvisible,
+  R_PspriteColormapRow,
+  R_RemapPspriteIndex,
+  SPRITE_SHADOW_FLICKER,
+  SPRITE_SHADOW_OPACITY,
+} from './r_sprite_logic.js';
 
-// Cache source indices, while each canvas lazily follows the active PLAYPAL.
+// Cache source indices and one remapped Canvas per COLORMAP row. Each Canvas
+// still resolves those remapped indices through the active PLAYPAL lazily.
 const _cache = new Map();
 export function R_ShutdownPlayerSprites() { _cache.clear(); }
-function decodeAsCanvas(lumpIdx) {
+function decodePatch(lumpIdx) {
   let entry = _cache.get(lumpIdx);
   if (entry !== undefined) return entry;
   const bytes = W_CacheLumpNum(firstspritelump + lumpIdx, 0);
@@ -39,9 +48,42 @@ function decodeAsCanvas(lumpIdx) {
       colptr += length + 4;
     }
   }
-  entry = V_CreatePaletteCanvasInfo(indices, alphas, p.width, p.height, p.leftoffset, p.topoffset);
+  entry = {
+    indices,
+    alphas,
+    w: p.width,
+    h: p.height,
+    leftoffset: p.leftoffset,
+    topoffset: p.topoffset,
+    canvases: new Map(),
+  };
   _cache.set(lumpIdx, entry);
   return entry;
+}
+
+// Build the palette-index image selected by R_DrawPSprite. The mapping is
+// cached independently of PLAYPAL; V_CreatePaletteCanvasInfo repaints it when
+// damage/bonus/radiation palette selection changes.
+export function R_CreatePspriteCanvasInfo(source, colormapRow, maps = colormaps) {
+  let canvasInfo = source.canvases.get(colormapRow);
+  if (canvasInfo !== undefined) return canvasInfo;
+
+  const remapped = new Uint8Array(source.indices.length);
+  for (let i = 0; i < remapped.length; i++) {
+    if (source.alphas[i] !== 0) {
+      remapped[i] = R_RemapPspriteIndex(source.indices[i], colormapRow, maps);
+    }
+  }
+  canvasInfo = V_CreatePaletteCanvasInfo(
+    remapped,
+    source.alphas,
+    source.w,
+    source.h,
+    source.leftoffset,
+    source.topoffset,
+  );
+  source.canvases.set(colormapRow, canvasInfo);
+  return canvasInfo;
 }
 
 // Draw the player's psprites onto the overlay canvas. Called from D_Display
@@ -51,6 +93,15 @@ export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH) 
   if (player === null || player.mo === null) return;
   const sx = dstW / SCREENWIDTH;
   const sy = dstH / SCREENHEIGHT;
+  const invisible = R_IsPspriteInvisible(player.powers?.[powertype_t.pw_invisibility] ?? 0);
+  const sectorLight = player.mo.subsector?.sector?.lightlevel ?? 255;
+  // Exact fuzzcolfunc would have to sample neighbouring pixels from the final
+  // composed indexed framebuffer. The Canvas overlay cannot access that
+  // structure, so it deliberately matches the world renderer's dark indexed
+  // silhouette plus translucent shimmer approximation instead.
+  const shadowOpacity = invisible
+    ? SPRITE_SHADOW_OPACITY + (Math.random() - 0.5) * 2 * SPRITE_SHADOW_FLICKER
+    : 1;
   for (const psp of player.psprites) {
     // Vanilla: `if (!psp->state) continue;` — state pointer NULL means inactive.
     // The JS port uses index 0 (S_NULL) or -1 as the inactive marker.
@@ -64,17 +115,31 @@ export function R_DrawPlayerSprites(overlayCtx, player, dstX, dstY, dstW, dstH) 
     const sf = sd.spriteframes[frame];
     const lumpIdx = sf.lump[0];
     if (lumpIdx < 0) continue;
-    const t = decodeAsCanvas(lumpIdx);
+    const source = decodePatch(lumpIdx);
+    const colormapRow = R_PspriteColormapRow(
+      invisible,
+      player.fixedcolormap,
+      st.frame,
+      sectorLight,
+      player.extralight,
+    );
+    const t = R_CreatePspriteCanvasInfo(source, colormapRow);
     // Ported from r_pspr.c:
     //   x1 = centerx + psp.sx - 160 - leftoffset  →  psp.sx - leftoffset (in pixels)
     //   patch_top_y = psp.sy - topoffset
     const patchX = (psp.sx >> 16) - t.leftoffset;
     const patchY = (psp.sy >> 16) - t.topoffset;
-    overlayCtx.drawImage(
-      t.canvas,
-      0, 0, t.w, t.h,
-      dstX + patchX * sx, dstY + patchY * sy,
-      t.w * sx, t.h * sy
-    );
+    const previousAlpha = overlayCtx.globalAlpha;
+    if (colormapRow === PSPRITE_SHADOW_ROW) overlayCtx.globalAlpha = shadowOpacity;
+    try {
+      overlayCtx.drawImage(
+        t.canvas,
+        0, 0, t.w, t.h,
+        dstX + patchX * sx, dstY + patchY * sy,
+        t.w * sx, t.h * sy
+      );
+    } finally {
+      overlayCtx.globalAlpha = previousAlpha;
+    }
   }
 }

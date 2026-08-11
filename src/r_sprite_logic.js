@@ -1,0 +1,50 @@
+// Pure sprite colour-selection helpers shared by the Canvas psprite path and
+// the WebGL world-sprite path.  Keeping the integer decisions here makes the
+// renderer's translation/COLORMAP precedence testable without a DOM or GL.
+
+export const SPRITE_FF_FULLBRIGHT = 0x8000;
+export const SPRITE_MF_SHADOW = 0x40000;
+
+// The WebGL renderer cannot reproduce fuzzcolfunc's screen-space readback, so
+// shadow sprites use one dark PLAYPAL index with translucent shimmer.  Canvas
+// psprites deliberately use the same approximation and constants.
+export const SPRITE_SHADOW_PALETTE_INDEX = 5;
+export const SPRITE_SHADOW_OPACITY = 0.33;
+export const SPRITE_SHADOW_FLICKER = 0.09;
+
+// A negative result is the explicit shadow/fuzz path; non-negative results
+// are literal COLORMAP rows.
+export const PSPRITE_SHADOW_ROW = -1;
+
+function clamp(value, low, high) {
+  return Math.min(Math.max(value, low), high);
+}
+
+// r_things.c:R_DrawPlayerSprites blinks the weapon back to normal during the
+// final four seconds of partial invisibility. MF_SHADOW remains set for that
+// whole interval, so the power timer (not the mobj flag) must select fuzz.
+export function R_IsPspriteInvisible(invisibilityPower) {
+  return invisibilityPower > 4 * 32 || (invisibilityPower & 8) !== 0;
+}
+
+// r_things.c:R_DrawPlayerSprites / R_DrawPSprite selects the psprite drawer in
+// this order: invisibility fuzz, fixed colormap, fullbright, normal lighting.
+// Normal psprites always use scalelight[MAXLIGHTSCALE-1], whose row offset is
+// floor(47 / DISTMAP) == 23 at Doom's 320-wide reference view.
+export function R_PspriteColormapRow(invisible, fixedColormap, frame, sectorLightLevel, extralight) {
+  if (invisible) return PSPRITE_SHADOW_ROW;
+  if (fixedColormap !== 0) return fixedColormap;
+  if ((frame & SPRITE_FF_FULLBRIGHT) !== 0) return 0;
+
+  const lightBucket = sectorLightLevel >> 4;
+  const light = clamp(lightBucket + extralight, 0, 15);
+  return clamp(((15 - light) * 4) - 23, 0, 31);
+}
+
+// Resolve one patch palette index through the already-selected psprite mode.
+// PLAYPAL is intentionally not consulted here: the returned palette index is
+// resolved through the active PLAYPAL only when the Canvas cache is painted.
+export function R_RemapPspriteIndex(sourceIndex, colormapRow, colormaps) {
+  if (colormapRow === PSPRITE_SHADOW_ROW) return SPRITE_SHADOW_PALETTE_INDEX;
+  return colormaps[colormapRow * 256 + sourceIndex];
+}

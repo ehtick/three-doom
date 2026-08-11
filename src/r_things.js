@@ -17,6 +17,13 @@ import { FRACBITS } from './m_fixed.js';
 import { patch_t } from './v_video.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { R_MakeIndexedTexture, R_MakeDoomSpriteMaterial } from './r_shader.js';
+import {
+  SPRITE_FF_FULLBRIGHT,
+  SPRITE_MF_SHADOW,
+  SPRITE_SHADOW_FLICKER,
+  SPRITE_SHADOW_OPACITY,
+  SPRITE_SHADOW_PALETTE_INDEX,
+} from './r_sprite_logic.js';
 
 // ---------- Sprite definition tables ----------
 export let numsprites = 0;
@@ -229,7 +236,7 @@ export function R_RegisterMobjSprite(mobj) {
   // first update; R_UpdateSprites supplies its indexed map immediately.
   const mat = R_MakeDoomSpriteMaterial(null, {
     alphaCutoff: SPRITE_ALPHATEST,
-    shadowPaletteIndex: SHADOW_PALETTE_INDEX,
+    shadowPaletteIndex: SPRITE_SHADOW_PALETTE_INDEX,
   });
   const sprite = new THREE.Sprite(mat);
   // WebGLRenderer only copies Sprite.center automatically for SpriteMaterial.
@@ -245,7 +252,6 @@ export function R_RegisterMobjSprite(mobj) {
 // info.c state.frame layout — high bit FF_FULLBRIGHT marks fullbright frames
 // (projectiles, fireballs, plasma). The low 15 bits FF_FRAMEMASK index into
 // sprite_t.spriteframes.
-const FF_FULLBRIGHT = 0x8000;
 const FF_FRAMEMASK  = 0x7fff;
 
 // MF_SHADOW (p_mobj.js) — the Spectre and the partial-invisibility powerup.
@@ -253,12 +259,9 @@ const FF_FRAMEMASK  = 0x7fff;
 // through a dark colormap. We can't run that screen-space pass yet, so we
 // approximate it with a dark, semi-transparent billboard that flickers and
 // jitters each frame (see R_UpdateSprites).
-const MF_SHADOW      = 0x40000;
-const SHADOW_PALETTE_INDEX = 5; // PLAYPAL 0: (27,27,27), near the old 0.12 tint
-const SHADOW_OPACITY = 0.33; // base translucency
-const SHADOW_FLICKER = 0.09; // +/- per-frame opacity shimmer
 const SHADOW_JITTER  = 1.5;  // vertical position shimmer, in map units
-// Below the opacity floor (SHADOW_OPACITY - SHADOW_FLICKER = 0.24) so silhouette
+// Below the opacity floor (SPRITE_SHADOW_OPACITY - SPRITE_SHADOW_FLICKER =
+// 0.24) so silhouette
 // texels pass, above 0 so the transparent surround is still discarded.
 const SHADOW_ALPHATEST = 0.1;
 // Default cutout for fully opaque sprites: keep solid texels, drop the
@@ -270,7 +273,7 @@ export function R_UpdateSprites() {
   for (const entry of _liveSprites) {
     const mo = entry.mobj;
     if (mo === null) continue;
-    const isShadow = (mo.flags & MF_SHADOW) !== 0;
+    const isShadow = (mo.flags & SPRITE_MF_SHADOW) !== 0;
     const st = states[mo.state];
     if (st === undefined) continue;
     const sd = sprites[st.sprite];
@@ -346,10 +349,10 @@ export function R_UpdateSprites() {
         mat.depthWrite = false; // translucent: don't occlude what's behind it
         uniforms.shadow.value = true;
         // The default alpha cutoff (0.5) compares against texAlpha * opacity. At
-        // SHADOW_OPACITY (~0.33) every silhouette texel falls under 0.5 and gets
-        // discarded — the Spectre vanishes entirely. Drop the threshold below the
-        // flickering opacity floor so the silhouette survives, while the fully
-        // transparent surround (alpha 0) is still culled.
+        // SPRITE_SHADOW_OPACITY (~0.33) puts every silhouette texel below the
+        // default 0.5 cutoff and would discard the Spectre entirely. Drop the
+        // threshold below the flickering opacity floor so the silhouette survives,
+        // while the fully transparent surround (alpha 0) is still culled.
         uniforms.alphaCutoff.value = SHADOW_ALPHATEST;
       } else {
         uniforms.shadow.value = false;
@@ -364,11 +367,12 @@ export function R_UpdateSprites() {
 
     if (isShadow) {
       // Per-frame flicker mimics fuzzcolfunc's shimmering static.
-      uniforms.opacity.value = SHADOW_OPACITY + (Math.random() - 0.5) * 2 * SHADOW_FLICKER;
+      uniforms.opacity.value = SPRITE_SHADOW_OPACITY
+        + (Math.random() - 0.5) * 2 * SPRITE_SHADOW_FLICKER;
     } else {
       // R_AddSprites selects a sector bucket before R_ProjectSprite applies
       // fixed/fullbright/distance precedence in the shader.
-      const fullbright = (mo.frame & FF_FULLBRIGHT) !== 0;
+      const fullbright = (mo.frame & SPRITE_FF_FULLBRIGHT) !== 0;
       let lightBucket = 15;
       if (mo.subsector !== null && mo.subsector.sector !== null) {
         lightBucket = mo.subsector.sector.lightlevel >> 4;
