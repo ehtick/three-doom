@@ -88,10 +88,8 @@ function D_DoAdvanceDemo() {
   switch (demosequence) {
     case 0:
       // Vanilla 1.10 holds TITLEPIC for 170 tics (~5 s) before launching
-      // DEMO1. In the browser that feels like the splash is hung; trim to
-      // 70 tics (~2 s) — long enough to recognize the title, short enough
-      // not to look broken.
-      pagetic = isCommercial ? (35 * 11) : 70;
+      // DEMO1 (commercial Doom uses its separate 11-second title interval).
+      pagetic = isCommercial ? (35 * 11) : 170;
       set_gamestate(gamestate_t.GS_DEMOSCREEN);
       pagename = 'TITLEPIC';
       // d_main.c:476 — title music: mus_dm2ttl for Doom 2, mus_intro for Doom 1.
