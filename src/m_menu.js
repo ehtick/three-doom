@@ -44,6 +44,8 @@ import { W_CacheLumpName } from './w_wad.js';
 import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4, NEWGAME } from './d_englsh.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
+import { HU_DrawLayout, HU_GetFont } from './hu_font.js';
+import { M_LayoutMessage } from './m_menu_text.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 const getPatch = V_DecodePatchToCanvas;
 const GAMMA_MESSAGES = [GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4];
@@ -520,11 +522,13 @@ function M_DrawThermo(ctx, x, y, thermWidth, thermDot, lx, ly, sx, sy) {
 }
 
 export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
-  if (!menuactive) {
-    // Even when menu is inactive, draw any pending modal message.
-    if (_message !== null) drawMessage(overlayCtx, dstX, dstY, dstW, dstH);
+  // m_menu.c:1752-1779 — a modal message replaces the menu drawer completely.
+  // Draw only its centered STCFN text, even when the underlying menu was open.
+  if (_message !== null) {
+    drawMessage(overlayCtx, dstX, dstY, dstW, dstH);
     return;
   }
+  if (!menuactive) return;
   if (_currentMenu === null) return;
   const m = _currentMenu;
   // Letterbox the menu layout to a 4:3 box centered in the passed area so
@@ -581,21 +585,16 @@ export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     overlayCtx.font = `bold ${Math.round(14 * sy)}px monospace`;
     overlayCtx.fillText('►', lx + (baseX - 16) * sx, ly + (baseY + 12 + _selected * LINE_HEIGHT) * sy);
   }
-  // Modal message renders on top.
-  if (_message !== null) drawMessage(overlayCtx, dstX, dstY, dstW, dstH);
 }
 
 function drawMessage(ctx, dstX, dstY, dstW, dstH) {
-  // m_menu.c:M_Drawer writes modal text directly over the current screen.
-  // Keep the framebuffer visible instead of adding a browser-only dim layer.
-  ctx.fillStyle = V_PaletteCSS(256 - 47);
-  ctx.font = `bold ${Math.round(dstH * 0.035)}px monospace`;
-  ctx.textAlign = 'center';
-  const lines = _message.text.split('\n');
-  const lh = dstH * 0.045;
-  const startY = dstY + dstH * 0.4 - (lines.length * lh) / 2;
-  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], dstX + dstW * 0.5, startY + i * lh);
-  ctx.textAlign = 'left';
+  // M_WriteText uses the same STCFN patches as the HUD. Keep the current
+  // framebuffer visible and map Doom's 320x200 coordinates into its centered
+  // 4:3 presentation box.
+  const scale = Math.min(dstW / 320, dstH / 200);
+  const lx = dstX + (dstW - 320 * scale) * 0.5;
+  const ly = dstY + (dstH - 200 * scale) * 0.5;
+  HU_DrawLayout(ctx, M_LayoutMessage(_message.text, HU_GetFont()), lx, ly, scale, scale);
 }
 
 // ---------- API expected by g_game.js ----------
