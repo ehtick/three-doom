@@ -3,7 +3,10 @@
 
 import { I_Init, I_GetTime, I_Error } from './i_system.js';
 import { I_InitGraphics, I_SetPalette, I_SetPaletteIndex, I_FinishUpdate, renderer, scene, camera } from './i_video.js';
-import { V_Init, V_DrawPatch, screens, patch_t } from './v_video.js';
+import {
+  V_Init, V_DrawPatch, V_DecodePatchToCanvas, V_DrawPatchAtCanvas,
+  screens, patch_t,
+} from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
 import { W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum } from './w_wad.js';
 import { M_CheckParm, myargv, myargc } from './m_argv.js';
@@ -35,6 +38,7 @@ import * as _GGame from './g_game.js';
 import { D_DEFAULT_IWAD_NAMES, D_GuessGameModeFromWad } from './d_iwad.js';
 import { D_AccumulateTics } from './d_timing.js';
 import { D_DoomRafLoop } from './d_loop.js';
+import { D_PausePatchPosition } from './d_display_logic.js';
 import {
   G_EnsurePlayerTopology, G_CollectActivePlayers, G_ReadDemoTiccmds,
   G_WriteDemoTiccmds,
@@ -144,6 +148,32 @@ function getOverlay() {
   return _overlayCtx;
 }
 
+function D_DrawPausePatch(overlayCtx) {
+  if (doomstat.paused !== true || _overlayCanvas === null) return;
+  const pause = V_DecodePatchToCanvas('M_PAUSE');
+  if (pause === null) return;
+  const scale = Math.min(
+    _overlayCanvas.width / SCREENWIDTH,
+    _overlayCanvas.height / SCREENHEIGHT,
+  );
+  const dstX = (_overlayCanvas.width - SCREENWIDTH * scale) * 0.5;
+  const dstY = (_overlayCanvas.height - SCREENHEIGHT * scale) * 0.5;
+  const position = D_PausePatchPosition(
+    doomstat.automapactive,
+    doomstat.viewwindowx,
+    doomstat.viewwindowy,
+    doomstat.scaledviewwidth,
+  );
+  V_DrawPatchAtCanvas(
+    overlayCtx,
+    pause,
+    dstX + position.x * scale,
+    dstY + position.y * scale,
+    scale,
+    scale,
+  );
+}
+
 function D_Display() {
   // d_main.c:273-275 — leaving the level restores PLAYPAL 0. Otherwise a
   // last-tic damage/bonus/radsuit palette can leak into intermission/finale.
@@ -156,13 +186,6 @@ function D_Display() {
     D_PageDrawer();
     if (renderer !== null) renderer.render(scene, camera);
     I_FinishUpdate(); // paints TITLEPIC to the same overlay canvas
-    // Title-screen menu overlay — draw on top of TITLEPIC (do NOT clear first
-    // or we'd wipe what I_FinishUpdate just put down).
-    if (_menuDrawer !== null) {
-      const o = getOverlay();
-      o.imageSmoothingEnabled = false;
-      _menuDrawer(o, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
-    }
   } else if (gamestate === gamestate_t.GS_LEVEL) {
     const p = players[consoleplayer];
     if (p !== undefined && p !== null && p.mo !== null) {
@@ -222,7 +245,6 @@ function D_Display() {
         const virtY = overlay.height - virtH;
         _stDrawer(o, 0, virtY, cw, virtH);
       }
-      if (_menuDrawer !== null) _menuDrawer(o, 0, 0, overlay.width, overlay.height);
     }
   } else if (gamestate === gamestate_t.GS_INTERMISSION) {
     // Black background under the intermission widgets.
@@ -238,7 +260,6 @@ function D_Display() {
       const dy = (ch - dh) * 0.5;
       _wiDrawer(o, dx, dy, dw, dh);
     }
-    if (_menuDrawer !== null) _menuDrawer(o, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
   } else if (gamestate === gamestate_t.GS_FINALE) {
     if (renderer !== null) renderer.render(scene, camera);
     const o = getOverlay();
@@ -251,10 +272,19 @@ function D_Display() {
       const dw = 320 * scale, dh = 200 * scale;
       _fDrawer(o, (cw - dw) * 0.5, (ch - dh) * 0.5, dw, dh);
     }
-    if (_menuDrawer !== null) _menuDrawer(o, 0, 0, cw, ch);
   } else {
     if (renderer !== null) renderer.render(scene, camera);
     I_FinishUpdate();
+  }
+
+  // d_main.c:D_Display draws M_PAUSE after every game-state drawer, then
+  // draws the menu on top of it. Keeping both here also makes that ordering
+  // identical for levels, intermissions, finales, and demo/title pages.
+  const overlay = getOverlay();
+  overlay.imageSmoothingEnabled = false;
+  D_DrawPausePatch(overlay);
+  if (_menuDrawer !== null) {
+    _menuDrawer(overlay, 0, 0, _overlayCanvas.width, _overlayCanvas.height);
   }
 }
 
