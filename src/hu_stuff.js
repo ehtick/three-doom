@@ -1,13 +1,13 @@
 // Ported from: linuxdoom-1.10/hu_stuff.c — heads-up display.
 // Pickup / item / secret messages, level title, and the STCFN font.
 
-import { players, consoleplayer, gameepisode, gamemap, gamemode } from './doomstat.js';
-import { GameMode_t } from './doomdef.js';
+import { players, consoleplayer, gameepisode, gamemap, gamemode, automapactive } from './doomstat.js';
 import { MSGON, MSGOFF } from './d_englsh.js';
 import {
   HU_DrawLayout, HU_FONTEND, HU_FONTSIZE, HU_FONTSTART, HU_GetFont,
   HU_LayoutText, HU_ShutdownFont,
 } from './hu_font.js';
+import { HU_LevelTitle } from './hu_title.js';
 
 // hu_stuff.c:showMessages — when false, gameplay messages are suppressed.
 // The toggle's own confirmation message is forced through regardless
@@ -21,56 +21,10 @@ export const HU_TITLEX    = 0;
 export const HU_TITLEY    = 167 - 12; // bottom of view, above STBAR
 export const HU_MSGTIMEOUT = 4 * 35;
 
-// Episode 1 level titles (shareware/registered). Doom 2 titles go in MAPNN slots.
-const HU_TITLES_E1 = [
-  '', // map 0 unused
-  "E1M1: HANGAR",
-  "E1M2: NUCLEAR PLANT",
-  "E1M3: TOXIN REFINERY",
-  "E1M4: COMMAND CONTROL",
-  "E1M5: PHOBOS LAB",
-  "E1M6: CENTRAL PROCESSING",
-  "E1M7: COMPUTER STATION",
-  "E1M8: PHOBOS ANOMALY",
-  "E1M9: MILITARY BASE",
-];
-const HU_TITLES_E2 = [
-  '',
-  "E2M1: DEIMOS ANOMALY",
-  "E2M2: CONTAINMENT AREA",
-  "E2M3: REFINERY",
-  "E2M4: DEIMOS LAB",
-  "E2M5: COMMAND CENTER",
-  "E2M6: HALLS OF THE DAMNED",
-  "E2M7: SPAWNING VATS",
-  "E2M8: TOWER OF BABEL",
-  "E2M9: FORTRESS OF MYSTERY",
-];
-const HU_TITLES_E3 = [
-  '',
-  "E3M1: HELL KEEP",
-  "E3M2: SLOUGH OF DESPAIR",
-  "E3M3: PANDEMONIUM",
-  "E3M4: HOUSE OF PAIN",
-  "E3M5: UNHOLY CATHEDRAL",
-  "E3M6: MT. EREBUS",
-  "E3M7: LIMBO",
-  "E3M8: DIS",
-  "E3M9: WARRENS",
-];
-
-function levelTitle() {
-  if (gamemode === GameMode_t.commercial) return `MAP${String(gamemap).padStart(2, '0')}`;
-  const tables = [null, HU_TITLES_E1, HU_TITLES_E2, HU_TITLES_E3];
-  const t = tables[gameepisode];
-  if (t === undefined || t === null) return '';
-  return t[gamemap] || '';
-}
-
 // State.
 let _msgText      = '';
 let _msgCounter   = 0;
-let _titleCounter = 0;
+let _titleText    = '';
 let _lastMo       = null;
 
 export function HU_Init() { /* fonts loaded lazily on first draw */ }
@@ -79,13 +33,15 @@ export function HU_Shutdown() {
   HU_ShutdownFont();
   _msgText = '';
   _msgCounter = 0;
-  _titleCounter = 0;
+  _titleText = '';
   _lastMo = null;
 }
 
 export function HU_Start() {
   _msgText = ''; _msgCounter = 0;
-  _titleCounter = 5 * 35; // show title for 5 seconds
+  // hu_stuff.c:440-470 builds the title widget once per HU_Start. It has no
+  // timeout; HU_Drawer gates the persistent line on automapactive.
+  _titleText = HU_LevelTitle(gamemode, gameepisode, gamemap);
 }
 
 // Push a message into the HUD. Called by P_TouchSpecialThing via player.message.
@@ -118,7 +74,6 @@ export function HU_Ticker() {
     p.message = '';
   }
   if (_msgCounter > 0)   _msgCounter--;
-  if (_titleCounter > 0) _titleCounter--;
 }
 
 export function HU_Responder(_ev) { return false; }
@@ -141,9 +96,8 @@ export function HU_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   if (_msgCounter > 0 && _msgText !== '') {
     drawText(overlayCtx, _msgText, HU_MSGX, HU_MSGY, dstX, dstY, sx, sy);
   }
-  // Level title fades in for 5 seconds after level start.
-  if (_titleCounter > 0) {
-    const title = levelTitle();
-    if (title !== '') drawText(overlayCtx, title, HU_TITLEX, HU_TITLEY, dstX, dstY, sx, sy);
+  // hu_stuff.c:486-493 draws the persistent title only over the automap.
+  if (automapactive && _titleText !== '') {
+    drawText(overlayCtx, _titleText, HU_TITLEX, HU_TITLEY, dstX, dstY, sx, sy);
   }
 }
