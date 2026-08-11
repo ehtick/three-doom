@@ -59,12 +59,21 @@ if (typeof globalThis !== 'undefined') globalThis.__doom_deathmatch = deathmatch
 // ---------- Sound volume ----------
 export let snd_SfxVolume   = 8;
 export let snd_MusicVolume = 8;
+// s_sound.c:numChannels is loaded from m_misc.c's `snd_channels` default.
+// Linux Doom's platform mixer has eight physical slots. Its config parser does
+// not validate this value, but an unbounded Web Audio allocator would exceed
+// that audible cap, so the browser port safely normalizes it to 0..8.
+export const MAX_SOUND_CHANNELS = 8;
+export let numChannels = 3;
 export let snd_MusicDevice = 0;
 export let snd_SfxDevice   = 0;
 export let snd_DesiredMusicDevice = 0;
 export let snd_DesiredSfxDevice   = 0;
 export function set_snd_SfxVolume(v)   { snd_SfxVolume = v; }
 export function set_snd_MusicVolume(v) { snd_MusicVolume = v; }
+export function set_numChannels(v) {
+  numChannels = Math.max(0, Math.min(MAX_SOUND_CHANNELS, v | 0));
+}
 
 // ---------- Refresh state flags ----------
 export let statusbaractive = true;

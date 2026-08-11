@@ -27,19 +27,21 @@ Deno.test('input, sound, messages, and video round-trip through registered defau
     doomstat.set_mouseSensitivity(8);
     doomstat.set_snd_SfxVolume(12);
     doomstat.set_snd_MusicVolume(3);
+    doomstat.set_numChannels(6);
     HU_SetShowMessages(0);
     set_usegamma(3);
     R_SetViewSize(10);
     M_SaveDefaults();
     assertEquals(
       values.get('doom:defaults'),
-      'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nshow_messages\t\t0\nusegamma\t\t3\nscreenblocks\t\t10',
+      'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nshow_messages\t\t0\nusegamma\t\t3\nscreenblocks\t\t10\nsnd_channels\t\t6',
       'saved defaults',
     );
 
     doomstat.set_mouseSensitivity(1);
     doomstat.set_snd_SfxVolume(1);
     doomstat.set_snd_MusicVolume(1);
+    doomstat.set_numChannels(1);
     HU_SetShowMessages(1);
     set_usegamma(1);
     R_SetViewSize(3);
@@ -47,6 +49,7 @@ Deno.test('input, sound, messages, and video round-trip through registered defau
     assertEquals(doomstat.mouseSensitivity, 8, 'loaded mouse sensitivity');
     assertEquals(doomstat.snd_SfxVolume, 12, 'loaded sfx volume');
     assertEquals(doomstat.snd_MusicVolume, 3, 'loaded music volume');
+    assertEquals(doomstat.numChannels, 6, 'loaded sound channels');
     assertEquals(showMessages, false, 'loaded message visibility');
     assertEquals(usegamma, 3, 'loaded gamma');
     assertEquals(R_GetScreenblocks(), 10, 'loaded screen blocks');
@@ -56,6 +59,7 @@ Deno.test('input, sound, messages, and video round-trip through registered defau
     assertEquals(doomstat.mouseSensitivity, 5, 'reference mouse default');
     assertEquals(doomstat.snd_SfxVolume, 8, 'reference sfx default');
     assertEquals(doomstat.snd_MusicVolume, 8, 'reference music default');
+    assertEquals(doomstat.numChannels, 3, 'reference channel default');
     assertEquals(showMessages, true, 'reference message default');
     assertEquals(usegamma, 0, 'reference gamma default');
     assertEquals(R_GetScreenblocks(), 9, 'reference screen-block default');
@@ -63,6 +67,7 @@ Deno.test('input, sound, messages, and video round-trip through registered defau
     doomstat.set_mouseSensitivity(5);
     doomstat.set_snd_SfxVolume(8);
     doomstat.set_snd_MusicVolume(8);
+    doomstat.set_numChannels(3);
     HU_SetShowMessages(1);
     set_usegamma(0);
     R_SetViewSize(9);
@@ -90,6 +95,7 @@ Deno.test('I_Quit saves defaults before late-registered graphics shutdown', asyn
     doomstat.set_mouseSensitivity(7);
     doomstat.set_snd_SfxVolume(11);
     doomstat.set_snd_MusicVolume(4);
+    doomstat.set_numChannels(7);
     HU_SetShowMessages(0);
     set_usegamma(4);
     R_SetViewSize(8);
@@ -103,13 +109,14 @@ Deno.test('I_Quit saves defaults before late-registered graphics shutdown', asyn
     assertEquals(calls.join(','), 'save,graphics', 'observable quit lifecycle order');
     assertEquals(
       values.get('doom:defaults'),
-      'mouse_sensitivity\t\t7\nsfx_volume\t\t11\nmusic_volume\t\t4\nshow_messages\t\t0\nusegamma\t\t4\nscreenblocks\t\t8',
+      'mouse_sensitivity\t\t7\nsfx_volume\t\t11\nmusic_volume\t\t4\nshow_messages\t\t0\nusegamma\t\t4\nscreenblocks\t\t8\nsnd_channels\t\t7',
       'quit defaults',
     );
   } finally {
     doomstat.set_mouseSensitivity(5);
     doomstat.set_snd_SfxVolume(8);
     doomstat.set_snd_MusicVolume(8);
+    doomstat.set_numChannels(3);
     HU_SetShowMessages(1);
     set_usegamma(0);
     R_SetViewSize(9);

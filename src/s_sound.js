@@ -5,19 +5,19 @@
 import * as I from './i_sound.js';
 import { S_sfx } from './sounds_data.js';
 import { snd_SfxVolume, snd_MusicVolume, set_snd_SfxVolume, set_snd_MusicVolume,
-  gameepisode, gamemap, gamemode } from './doomstat.js';
+  gameepisode, gamemap, gamemode, numChannels } from './doomstat.js';
 import { ANG90, ANGLETOFINESHIFT, FINEMASK, finecosine, finesine } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { M_Random } from './m_random.js';
 import { GameMode_t } from './doomdef.js';
+import { S_ChooseChannel } from './s_channel_logic.js';
 
-// s_sound.h MAX_CHANNELS = 8 in vanilla. The m_misc.c config default for
-// snd_channels is 3 (likely a leftover from DMX tuning); 8 matches the
-// release-build cap and what most ports ship with.
-const NUM_CHANNELS = 8;
 // Each channel: { sfxinfo, origin (mobj or null), handle }
-const channels = new Array(NUM_CHANNELS);
-for (let i = 0; i < NUM_CHANNELS; i++) channels[i] = { sfxinfo: null, origin: null, handle: 0 };
+let channels = [];
+
+function makeChannels(count) {
+  return Array.from({ length: count }, () => ({ sfxinfo: null, origin: null, handle: 0 }));
+}
 
 let _listener = null;
 
@@ -27,6 +27,10 @@ export function S_Init(sfxVolume, musicVolume) {
   // s_sound.c:264 — apply the volumes the menu/config booted with.
   if (typeof sfxVolume   === 'number') S_SetSfxVolume(sfxVolume);
   if (typeof musicVolume === 'number') S_SetMusicVolume(musicVolume);
+  // s_sound.c:176-184 — allocate exactly the configured logical channel
+  // count after defaults have loaded. The platform mixer remains capped at 8.
+  for (let i = 0; i < channels.length; i++) S_StopChannel(i);
+  channels = makeChannels(numChannels);
 }
 
 // s_sound.c — Doom 1 E4 substitute music (E4 reuses the E2/E3 tracks).
@@ -38,7 +42,7 @@ const _spmus = [
 
 export function S_Start() {
   // s_sound.c:159 — stop everything before level swap.
-  for (let i = 0; i < NUM_CHANNELS; i++) {
+  for (let i = 0; i < channels.length; i++) {
     const ch = channels[i];
     if (ch.handle !== 0) I.I_StopSound(ch.handle);
     ch.sfxinfo = null; ch.origin = null; ch.handle = 0;
@@ -88,7 +92,7 @@ function isChannelFree(cnum) {
 // regardless of which sfx it is (one sound per origin), then break. Used both as
 // the public stop-by-origin and as the pre-step before claiming a channel.
 function S_StopSoundOrigin(origin) {
-  for (let i = 0; i < NUM_CHANNELS; i++) {
+  for (let i = 0; i < channels.length; i++) {
     if (channels[i].sfxinfo !== null && channels[i].origin === origin) {
       S_StopChannel(i);
       break;
@@ -102,26 +106,7 @@ function S_StopSoundOrigin(origin) {
 // a channel whose number is >= its own (vanilla breaks on the FIRST such
 // channel in index order — it does NOT hunt for the global minimum).
 function S_getChannel(origin, sfx) {
-  let cnum;
-  // Find an open channel (or reuse one already playing from this origin).
-  for (cnum = 0; cnum < NUM_CHANNELS; cnum++) {
-    if (isChannelFree(cnum)) break;
-    else if (origin !== null && channels[cnum].origin === origin) {
-      S_StopChannel(cnum);
-      break;
-    }
-  }
-  // None available: kick the first equally-or-less-important channel.
-  if (cnum === NUM_CHANNELS) {
-    for (cnum = 0; cnum < NUM_CHANNELS; cnum++) {
-      if (channels[cnum].sfxinfo.priority >= sfx.priority) break;
-    }
-    if (cnum === NUM_CHANNELS) return -1; // every channel is strictly more important
-    S_StopChannel(cnum);
-  }
-  channels[cnum].sfxinfo = sfx;
-  channels[cnum].origin  = origin;
-  return cnum;
+  return S_ChooseChannel(channels, origin, sfx, isChannelFree, S_StopChannel);
 }
 
 // S_AdjustSoundParams — mirror vanilla. Returns null if inaudible, else
@@ -338,7 +323,7 @@ export function S_ResumeSound() {
 // vol/sep to channels that are still audible.
 export function S_UpdateSounds(listener) {
   _listener = listener;
-  for (let i = 0; i < NUM_CHANNELS; i++) {
+  for (let i = 0; i < channels.length; i++) {
     const c = channels[i];
     if (c.sfxinfo === null || c.handle === 0) continue;
     if (!I.I_SoundIsPlaying(c.handle)) {

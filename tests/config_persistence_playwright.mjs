@@ -47,6 +47,7 @@ try {
       mouseSensitivity: doomstat.mouseSensitivity,
       sfxVolume: doomstat.snd_SfxVolume,
       musicVolume: doomstat.snd_MusicVolume,
+      sndChannels: doomstat.numChannels,
       showMessages: hu.showMessages,
       usegamma: video.usegamma,
       screenblocks: view.R_GetScreenblocks(),
@@ -61,6 +62,7 @@ try {
     doomstat.set_mouseSensitivity(8);
     doomstat.set_snd_SfxVolume(12);
     doomstat.set_snd_MusicVolume(3);
+    doomstat.set_numChannels(6);
     hu.HU_SetShowMessages(0);
     video.set_usegamma(3);
     view.R_SetViewSize(10);
@@ -79,6 +81,7 @@ try {
       mouseSensitivity: doomstat.mouseSensitivity,
       sfxVolume: doomstat.snd_SfxVolume,
       musicVolume: doomstat.snd_MusicVolume,
+      sndChannels: doomstat.numChannels,
       showMessages: hu.showMessages,
       usegamma: video.usegamma,
       screenblocks: view.R_GetScreenblocks(),
@@ -92,15 +95,15 @@ try {
 
   const failures = [];
   if (initial.mouseSensitivity !== 5 || initial.sfxVolume !== 8 ||
-      initial.musicVolume !== 8 || initial.showMessages !== true ||
+      initial.musicVolume !== 8 || initial.sndChannels !== 3 || initial.showMessages !== true ||
       initial.usegamma !== 0 || initial.screenblocks !== 9) {
     failures.push(`reference defaults mismatch: ${JSON.stringify(initial)}`);
   }
-  if (saved !== 'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nshow_messages\t\t0\nusegamma\t\t3\nscreenblocks\t\t10') {
+  if (saved !== 'mouse_sensitivity\t\t8\nsfx_volume\t\t12\nmusic_volume\t\t3\nshow_messages\t\t0\nusegamma\t\t3\nscreenblocks\t\t10\nsnd_channels\t\t6') {
     failures.push(`quit save mismatch: ${JSON.stringify(saved)}`);
   }
   if (reloaded.mouseSensitivity !== 8 || reloaded.sfxVolume !== 12 ||
-      reloaded.musicVolume !== 3 || reloaded.showMessages !== false ||
+      reloaded.musicVolume !== 3 || reloaded.sndChannels !== 6 || reloaded.showMessages !== false ||
       reloaded.usegamma !== 3 ||
       reloaded.screenblocks !== 10 || JSON.stringify(reloaded.viewport) !== '[320,168]' ||
       reloaded.defaults !== saved) {

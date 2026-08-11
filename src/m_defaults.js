@@ -35,4 +35,8 @@ export function M_RegisterDoomDefaults() {
     get: () => R_GetScreenblocks(),
     set: (value) => R_SetViewSize(value | 0),
   }, 9);
+  M_RegisterDefault('snd_channels', {
+    get: () => doomstat.numChannels,
+    set: (value) => doomstat.set_numChannels(value),
+  }, 3);
 }
