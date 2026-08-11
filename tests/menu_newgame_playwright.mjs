@@ -63,9 +63,7 @@ try {
       doomstat.set_gameepisode(seedEpisode);
       resetMain(GameMode_t.commercial, net, demo);
       const opened = key(KEY_ENTER); // Main -> Skill, never Episode.
-      key(KEY_DOWNARROW);
-      key(KEY_DOWNARROW);
-      const chosen = key(KEY_ENTER); // Hurt Me Plenty.
+      const chosen = key(KEY_ENTER); // Default NewDef row: Hurt Me Plenty.
       const deferred = doomstat.gameaction === gameaction_t.ga_newgame;
       game.G_DoNewGame();
       const value = {
@@ -91,7 +89,7 @@ try {
     key(KEY_DOWNARROW);
     key(KEY_DOWNARROW);
     key(KEY_ENTER); // Episode 3 -> Skill.
-    key(KEY_ENTER); // First skill.
+    key(KEY_ENTER); // Default NewDef row: Hurt Me Plenty.
     const noncommercialDeferred = doomstat.gameaction === gameaction_t.ga_newgame;
     game.G_DoNewGame();
     const noncommercial = {
@@ -129,7 +127,7 @@ try {
     }
   }
   if (!result.noncommercial.deferred || result.noncommercial.episode !== 3 ||
-      result.noncommercial.skill !== 0 || result.noncommercial.map !== 1) {
+      result.noncommercial.skill !== 2 || result.noncommercial.map !== 1) {
     failures.push(`noncommercial episode route failed: ${JSON.stringify(result.noncommercial)}`);
   }
   if (!result.refusal.refusalOpened || !result.refusal.activeWithMessage ||

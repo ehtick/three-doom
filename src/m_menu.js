@@ -139,7 +139,8 @@ function M_NewGame() {
   _openEpisodeMenu();
 }
 
-const SKILL_MENU = { name: 'Skill', x: 48, y: 63, items: [
+// m_menu.c:324-332 — NewDef.lastOn starts on hurtme, not the first skill.
+const SKILL_MENU = { name: 'Skill', x: 48, y: 63, lastOn: 2, items: [
   { patch: 'M_JKILL', label: "I'm too young to die.", action: () => _chooseSkill(0) },
   { patch: 'M_ROUGH', label: 'Hey, not too rough.',    action: () => _chooseSkill(1) },
   { patch: 'M_HURT',  label: 'Hurt me plenty.',        action: () => _chooseSkill(2) },

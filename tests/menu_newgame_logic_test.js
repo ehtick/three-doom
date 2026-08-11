@@ -57,3 +57,13 @@ Deno.test('menu integration resets the commercial pending episode', async () => 
     throw new Error('M_NewGame is not wired to the reference routing outcomes');
   }
 });
+
+Deno.test('NewDef starts on Hurt Me Plenty', async () => {
+  const source = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
+  const start = source.indexOf('const SKILL_MENU');
+  const end = source.indexOf('// m_menu.c:339-372', start);
+  const definition = source.slice(start, end);
+  if (!definition.includes("name: 'Skill', x: 48, y: 63, lastOn: 2")) {
+    throw new Error('SKILL_MENU does not preserve NewDef.lastOn = hurtme');
+  }
+});
