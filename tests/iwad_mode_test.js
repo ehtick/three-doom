@@ -31,9 +31,18 @@ Deno.test('map-lump families identify each IWAD game mode', () => {
   assertEquals(D_GuessGameModeFromWad(syntheticWad(['MAP01'])), GameMode_t.commercial, 'commercial');
 });
 
-Deno.test('default search accepts the documented full-game filenames', () => {
-  assertEquals(D_DEFAULT_IWAD_NAMES.includes('doom.wad'), true, 'registered IWAD filename');
-  assertEquals(D_DEFAULT_IWAD_NAMES.includes('doom2.wad'), true, 'commercial IWAD filename');
+Deno.test('default search prefers full games and includes mission packs', () => {
+  const index = (name) => D_DEFAULT_IWAD_NAMES.indexOf(name);
+  assertEquals(index('doom2f.wad') >= 0, true, 'French commercial IWAD filename');
+  assertEquals(index('doom2.wad') >= 0, true, 'commercial IWAD filename');
+  assertEquals(index('plutonia.wad') >= 0, true, 'Plutonia IWAD filename');
+  assertEquals(index('tnt.wad') >= 0, true, 'TNT IWAD filename');
+  assertEquals(index('doomu.wad') >= 0, true, 'retail IWAD filename');
+  assertEquals(index('doom.wad') >= 0, true, 'registered IWAD filename');
+  assertEquals(index('doom1.wad') >= 0, true, 'shareware IWAD filename');
+  assertEquals(index('doom2.wad') < index('doom1.wad'), true, 'commercial precedes shareware');
+  assertEquals(index('doomu.wad') < index('doom1.wad'), true, 'retail precedes shareware');
+  assertEquals(index('doom.wad') < index('doom1.wad'), true, 'registered precedes shareware');
 });
 
 Deno.test('classification follows contents for renamed IWADs and typed-array views', () => {

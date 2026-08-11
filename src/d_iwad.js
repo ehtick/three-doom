@@ -3,14 +3,17 @@
 
 import { GameMode_t } from './doomdef.js';
 
-// Keep the bundled name first so the normal shareware path is one request.
-// If users replace it with a conventionally named registered/commercial IWAD,
-// the browser falls through to those names without requiring a URL argument.
+// Match linuxdoom's full-game-first search order. The repository includes
+// doom1.wad, so putting shareware first would otherwise mask any full IWAD a
+// user adds alongside it. `-iwad` remains the explicit override.
 export const D_DEFAULT_IWAD_NAMES = Object.freeze([
-  'doom1.wad',
-  'doom.wad',
-  'doomu.wad',
+  'doom2f.wad',
   'doom2.wad',
+  'plutonia.wad',
+  'tnt.wad',
+  'doomu.wad',
+  'doom.wad',
+  'doom1.wad',
 ]);
 
 function wadView(buffer) {
