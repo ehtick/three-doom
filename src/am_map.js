@@ -4,12 +4,16 @@
 // via 'f', Tab to open/close, mark placement via 'm', and mark clear via 'c'.
 
 import { lines, numlines } from './p_setup.js';
-import { players, consoleplayer } from './doomstat.js';
+import {
+  players, consoleplayer, automapactive, set_automapactive,
+} from './doomstat.js';
 import { ML_DONTDRAW, ML_SECRET, ML_MAPPED } from './doomdata.js';
 import { V_PaletteCSS } from './v_palette.js';
 
-export let automapactive = false;
-export function set_automapactive(v) { automapactive = v; }
+// automapactive is a single engine-wide global in vanilla. Re-export the
+// doomstat live binding so finale/level transitions and AM_* always mutate
+// and observe the same state.
+export { automapactive, set_automapactive } from './doomstat.js';
 
 let _viewX = 0, _viewY = 0;
 let _scale = 0.25;
@@ -46,7 +50,7 @@ export function AM_addMark() {
 }
 
 export function AM_Start() {
-  automapactive = true;
+  set_automapactive(true);
   const p = players[consoleplayer];
   if (p !== undefined && p !== null && p.mo !== null) {
     _viewX = p.mo.x / 65536;
@@ -54,7 +58,7 @@ export function AM_Start() {
   }
 }
 
-export function AM_Stop() { automapactive = false; }
+export function AM_Stop() { set_automapactive(false); }
 export function AM_Toggle() { if (automapactive) AM_Stop(); else AM_Start(); }
 
 export function AM_Ticker() {
