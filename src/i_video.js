@@ -19,6 +19,7 @@ import {
 } from './v_palette.js';
 import { R_SetPaletteIndex, R_SetPlaypal, R_ShutdownShader } from './r_shader.js';
 import { D_DoomRafLoop } from './d_loop.js';
+import { D_ShouldInterceptDemoInput } from './d_input_logic.js';
 
 // ---------- Three.js setup ----------
 export let renderer = null;
@@ -56,6 +57,10 @@ let _shutdownPromise = null;
 let _shuttingDown = false;
 const _shutdownHooks = new Set();
 
+function demoInputIsIntercepted() {
+  return _doomstat !== null && D_ShouldInterceptDemoInput(_doomstat);
+}
+
 // Input modules register their listener cleanup here. This lets graphics
 // shutdown detach input synchronously before its async resource imports yield.
 export function I_RegisterGraphicsShutdownHook(hook) {
@@ -78,8 +83,7 @@ function onRendererClick(e) {
   }
   // g_game.c:G_Responder opens the menu for a mouse-button event throughout
   // demo playback, including demo intermissions/finales, not just GS_LEVEL.
-  if ((_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/) &&
-      _mMenu !== null) {
+  if (demoInputIsIntercepted() && _mMenu !== null) {
     _mMenu.M_StartControlPanel();
     return;
   }
@@ -467,15 +471,13 @@ function onKeyUp(e) {
 
 let mouseButtons = 0;
 function onMouseMove(e) {
-  if (_doomstat !== null &&
-      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) return;
+  if (demoInputIsIntercepted()) return;
   if (document.pointerLockElement !== renderer?.domElement) return;
   // Doom expects ev_mouse with x/y deltas. movementX/movementY are in CSS pixels.
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: e.movementX | 0, data3: -e.movementY | 0 });
 }
 function onMouseDown(e) {
-  if (_doomstat !== null &&
-      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) {
+  if (demoInputIsIntercepted()) {
     e.preventDefault?.();
     return;
   }
@@ -484,7 +486,6 @@ function onMouseDown(e) {
 }
 function onMouseUp(e) {
   mouseButtons &= ~(1 << e.button);
-  if (_doomstat !== null &&
-      (_doomstat.demoplayback === true || _doomstat.gamestate === 3 /*GS_DEMOSCREEN*/)) return;
+  if (demoInputIsIntercepted()) return;
   D_PostEvent({ type: evtype_t.ev_mouse, data1: mouseButtons, data2: 0, data3: 0 });
 }

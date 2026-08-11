@@ -4,6 +4,7 @@ import {
   D_ResetLevelInputState,
   D_ScaleMouseDelta,
   D_ShouldCaptureGameplayPress,
+  D_ShouldInterceptDemoInput,
 } from '../src/d_input_logic.js';
 
 function assertMovement(input, turnheld, expected, message) {
@@ -126,5 +127,23 @@ Deno.test('level input reset clears held command state without replacing keys', 
       mouseButtons: reset.mouseButtons,
       sendpause: reset.sendpause,
     })}`);
+  }
+});
+
+Deno.test('demo interception honors gameaction and singledemo guards', () => {
+  for (const gamestate of [0, 1, 2, 3]) {
+    for (const demoplayback of [false, true]) {
+      const attract = gamestate === 3 || demoplayback;
+      const base = { gameaction: 0, singledemo: false, demoplayback, gamestate };
+      if (D_ShouldInterceptDemoInput(base) !== attract) {
+        throw new Error(`base interception mismatch for state ${gamestate}, demo ${demoplayback}`);
+      }
+      if (D_ShouldInterceptDemoInput({ ...base, singledemo: true }) !== false) {
+        throw new Error(`singledemo intercepted for state ${gamestate}, demo ${demoplayback}`);
+      }
+      if (D_ShouldInterceptDemoInput({ ...base, gameaction: 8 }) !== false) {
+        throw new Error(`queued action intercepted for state ${gamestate}, demo ${demoplayback}`);
+      }
+    }
   }
 });

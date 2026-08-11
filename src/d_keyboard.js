@@ -12,6 +12,7 @@ import {
   D_ResetLevelInputState,
   D_ScaleMouseDelta,
   D_ShouldCaptureGameplayPress,
+  D_ShouldInterceptDemoInput,
 } from './d_input_logic.js';
 import * as doomstat from './doomstat.js';
 
@@ -48,6 +49,9 @@ let _listenerGeneration = 0;
 function listenerIsActive(generation) {
   return _listenersInstalled === true && generation === _listenerGeneration;
 }
+function demoInputIsIntercepted() {
+  return D_ShouldInterceptDemoInput(doomstat);
+}
 async function onKeyDown(e) {
       const generation = _listenerGeneration;
       // preventDefault must run SYNCHRONOUSLY during dispatch — call it before
@@ -77,7 +81,7 @@ async function onKeyDown(e) {
       // keypress opens the main menu so the user doesn't have to know which
       // key to press. Esc keeps the menu closed in that state.
       if (doomstat.menuactive !== true &&
-          (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ || doomstat.demoplayback === true)) {
+          demoInputIsIntercepted()) {
         if (e.code !== 'Escape' && _mMenu !== null) _mMenu.M_StartControlPanel();
         e.preventDefault?.();
         return;
@@ -165,7 +169,7 @@ function onKeyUp(e) { keys.delete(e.code); }
 function onMouseDown(e) {
     // g_game.c's demo interception consumes mouse-button presses before they
     // can alter gameplay state. i_video opens the menu on the matching click.
-    if (doomstat.gamestate === 3 /*GS_DEMOSCREEN*/ || doomstat.demoplayback === true) {
+    if (demoInputIsIntercepted()) {
       e.preventDefault?.();
       return;
     }
@@ -196,8 +200,7 @@ function onMouseDown(e) {
 function onMouseUp(e) { mouseButtons &= ~(1 << e.button); }
 
 function onMouseMove(e) {
-    if (doomstat.menuactive !== true && doomstat.demoplayback !== true &&
-        doomstat.gamestate !== 3 /*GS_DEMOSCREEN*/ &&
+    if (doomstat.menuactive !== true && demoInputIsIntercepted() !== true &&
         renderer !== null && document.pointerLockElement === renderer.domElement) {
       // g_game.c:G_Responder applies sensitivity before G_BuildTiccmd consumes
       // the axes. Preserve that per-event truncation while accumulating the

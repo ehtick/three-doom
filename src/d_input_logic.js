@@ -34,6 +34,16 @@ export function D_ShouldCaptureGameplayPress(menuConsumed) {
   return menuConsumed !== true;
 }
 
+// g_game.c:G_Responder's attract/demo interception is disabled for explicit
+// single-demo playback and while a game action is queued. Keep this predicate
+// shared by both DOM input adapters so keyboard, buttons, clicks, and motion
+// cannot disagree about ownership.
+export function D_ShouldInterceptDemoInput(state) {
+  return (state.gameaction | 0) === 0 /*ga_nothing*/ &&
+    state.singledemo !== true &&
+    (state.demoplayback === true || state.gamestate === 3 /*GS_DEMOSCREEN*/);
+}
+
 // g_game.c:G_Responder scales each mouse axis with integer arithmetic:
 //   delta * (mouseSensitivity + 5) / 10
 // C integer division truncates toward zero. The final bitwise conversion also

@@ -197,6 +197,22 @@ try {
     const demoMouse = sample();
     const demoMouseMenu = doomstat.menuactive;
     canvas.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true, cancelable: true }));
+
+    // Explicit -playdemo mode and queued game actions bypass the attract-menu
+    // interception exactly as G_Responder's two guards require.
+    menu.M_ClearMenus();
+    doomstat.set_singledemo(true);
+    key('keydown', 'ControlLeft', 'Control');
+    const singleDemoInput = sample();
+    const singleDemoMenu = doomstat.menuactive;
+    key('keyup', 'ControlLeft', 'Control');
+    doomstat.set_singledemo(false);
+    doomstat.set_gameaction(events.gameaction_t.ga_worlddone);
+    key('keydown', 'ControlLeft', 'Control');
+    const queuedActionInput = sample();
+    const queuedActionMenu = doomstat.menuactive;
+    key('keyup', 'ControlLeft', 'Control');
+    doomstat.set_gameaction(events.gameaction_t.ga_nothing);
     doomstat.set_demoplayback(false);
     doomstat.set_gamestate(0 /*GS_LEVEL*/);
 
@@ -241,6 +257,10 @@ try {
       demoKeyboardMenu,
       demoMouse,
       demoMouseMenu,
+      singleDemoInput,
+      singleDemoMenu,
+      queuedActionInput,
+      queuedActionMenu,
       castPause,
       castWasActive,
     };
@@ -287,6 +307,12 @@ try {
   }
   if (!zero(result.demoMouse) || result.demoMouseMenu !== true) {
     failures.push(`demo-intermission mouse leaked or missed menu: ${JSON.stringify(result.demoMouse)}`);
+  }
+  if ((result.singleDemoInput.buttons & 1) === 0 || result.singleDemoMenu !== false) {
+    failures.push(`singledemo input was intercepted: ${JSON.stringify(result.singleDemoInput)}`);
+  }
+  if ((result.queuedActionInput.buttons & 1) === 0 || result.queuedActionMenu !== false) {
+    failures.push(`queued-action input was intercepted: ${JSON.stringify(result.queuedActionInput)}`);
   }
   if (!zero(result.castPause) || result.castWasActive !== true) {
     failures.push(`cast did not consume Pause before ticcmd capture: ${JSON.stringify(result.castPause)}`);
