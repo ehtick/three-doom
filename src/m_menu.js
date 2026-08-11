@@ -47,6 +47,7 @@ import {
   NETEND, NEWGAME,
 } from './d_englsh.js';
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
+import { M_ConfirmQuit, QUIT_CONFIRM_KEY } from './m_menu_quit_logic.js';
 import { M_ALPHA_KEYS, M_FindAlphaItem } from './m_menu_alpha_logic.js';
 import { M_RestoreMainCursor } from './m_menu_cursor_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
@@ -292,15 +293,16 @@ export function M_SetMusicVolume(value) {
 }
 
 // ---------- Modal message prompt ----------
-let _message = null;    // { text, routine, input, lastMenuActive }
+let _message = null;    // { text, routine, input, tapKey, lastMenuActive }
 let _input = false;     // input echo for save slot edit
 let _saveEditingSlot = -1;
 
-export function M_StartMessage(text, routine, input) {
+export function M_StartMessage(text, routine, input, tapKey = null) {
   _message = {
     text,
     routine,
     input: input === true,
+    tapKey,
     lastMenuActive: menuactive,
   };
   set_menuactive(true);
@@ -308,6 +310,19 @@ export function M_StartMessage(text, routine, input) {
 export function M_StopMessage() {
   if (_message !== null) set_menuactive(_message.lastMenuActive);
   _message = null;
+}
+
+function dismissMessage(key) {
+  const message = _message;
+  if (message === null) return false;
+  set_menuactive(message.lastMenuActive);
+  _message = null;
+  message.routine?.(key);
+  // Vanilla closes the control panel after every message dismissal, even
+  // when the message was opened from an active submenu.
+  set_menuactive(false);
+  S_StartSound(null, sfx_swtchx);
+  return true;
 }
 
 // d_main owns the attract-loop state. Wire its synchronous title entry point
@@ -427,13 +442,25 @@ const QUIT_MESSAGES = [
   'ya know, next time you come in here\ni\'m gonna toast ya.',
   'go ahead and leave. see if i care.',
 ];
+const _quitLinkState = { linkOpened: false };
+function M_QuitResponse(key) {
+  M_ConfirmQuit(
+    key,
+    _quitLinkState,
+    (...args) => globalThis.open?.(...args),
+    I_Quit,
+  );
+}
 function M_QuitDOOM() {
   // m_menu.c:1105 — deterministic by gametic so it's reproducible per session.
   const gametic = (globalThis.__doom_gametic | 0);
   const idx = (gametic % (QUIT_MESSAGES.length - 1)) + 1;
-  M_StartMessage(QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y to quit)', (key) => {
-    if (key === 0x79 /*y*/) I_Quit();
-  }, true);
+  M_StartMessage(
+    QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y or click to quit)',
+    M_QuitResponse,
+    true,
+    QUIT_CONFIRM_KEY,
+  );
 }
 
 // ---------- Lifecycle ----------
@@ -495,15 +522,7 @@ export function M_Responder(ev) {
   // through to the remaining responders.
   if (_message !== null) {
     if (M_MessageAcceptsKey(_message.input, key) !== true) return false;
-    const message = _message;
-    set_menuactive(message.lastMenuActive);
-    _message = null;
-    message.routine?.(key);
-    // Vanilla closes the control panel after every message dismissal, even
-    // when the message was opened from an active submenu.
-    set_menuactive(false);
-    S_StartSound(null, sfx_swtchx);
-    return true;
+    return dismissMessage(key);
   }
   // m_menu.c:1522-1534 — closed-map +/- are global view-size shortcuts.
   // When automap is active M_Responder declines them so AM_Responder can zoom.
@@ -621,8 +640,12 @@ export function M_Responder(ev) {
 // returns true when the tap was consumed.
 export function M_HandleTap(px, py) {
   if (menuactive !== true) return false;
-  // Modal y/n prompts stay keyboard-only so a stray tap can't confirm a quit.
-  if (_message !== null) return true;
+  // Prompts remain keyboard-only unless their call site explicitly assigns a
+  // tap key. Quit maps a tap to lowercase Y so touch users can confirm it.
+  if (_message !== null) {
+    if (_message.tapKey === null) return true;
+    return dismissMessage(_message.tapKey);
+  }
   const m = _currentMenu;
   if (m === null || _lastLayout === null) return true;
   const { lx, ly, sx, sy } = _lastLayout;

@@ -138,8 +138,15 @@ Deno.test('startup registers defaults before loading and menu quit uses I_Quit',
   }
 
   const menu = await Deno.readTextFile(new URL('../src/m_menu.js', import.meta.url));
+  const quitResponse = menu.slice(
+    menu.indexOf('function M_QuitResponse(key)'),
+    menu.indexOf('function M_QuitDOOM()'),
+  );
   const quit = menu.slice(menu.indexOf('function M_QuitDOOM()'), menu.indexOf('// ---------- Lifecycle ----------'));
-  if (!quit.includes('if (key === 0x79 /*y*/) I_Quit()') ||
+  if (!quitResponse.includes('M_ConfirmQuit(') ||
+      !quitResponse.includes('(...args) => globalThis.open?.(...args)') ||
+      !quitResponse.includes('I_Quit') ||
+      !quit.includes('M_QuitResponse') ||
       quit.includes('window.location.reload')) {
     throw new Error('menu quit does not route through the saving I_Quit path');
   }

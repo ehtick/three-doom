@@ -38,7 +38,7 @@ Deno.test('menu call sites use the reference message-input modes', async () => {
   );
   if (!shareware.includes('null, false)') ||
       !nightmare.includes('}, true)') ||
-      !quit.includes('}, true)')) {
+      !quit.includes('QUIT_CONFIRM_KEY')) {
     throw new Error('shareware/Nightmare/Quit message modes differ from m_menu.c');
   }
 });
