@@ -13,14 +13,17 @@ import { GameMode_t, gamestate_t } from './doomdef.js';
 import { gameaction_t } from './d_event.js';
 import { V_CreatePaletteCanvasInfo, V_DecodePatchToCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
+import {
+  HU_DrawLayout, HU_GetFont, HU_LayoutCenteredText, HU_LayoutText,
+} from './hu_font.js';
 import { S_ChangeMusic, S_StartMusic, S_StartSound } from './s_sound.js';
 import { mus_victor, mus_read_m, mus_bunny, mus_evil, sfx_pistol } from './sounds.js';
 import { W_CacheLumpNum, W_CheckNumForName, lumpinfo } from './w_wad.js';
 import { firstspritelump } from './r_data.js';
 import { sprites } from './r_things.js';
 import {
-  F_GetBunnyScroll, F_GetDoom1ArtPatch, F_GetFinaleSpec, F_ShouldAdvanceCommercial,
-  F_UpdateBunnyStage,
+  F_GetBunnyScroll, F_GetDoom1ArtPatch, F_GetFinaleSpec, F_GetFinaleTextCount,
+  F_ShouldAdvanceCommercial, F_UpdateBunnyStage,
 } from './f_finale_logic.js';
 import {
   F_CreateCastState, F_GetCastDisplay, F_KillCast, F_TickCast,
@@ -39,7 +42,6 @@ const getPatch = V_DecodePatchToCanvas;
 const F_TEXTWAIT = 250;
 // f_finale.c:TEXTSPEED — one character per 3 tics (≈12 chars/s at 35Hz).
 const F_TEXTSPEED = 3;
-const F_TEXTSTART = 10; // tics before the first character appears
 
 export function F_StartFinale(onDone) {
   // f_finale.c:96-101 — entering a finale consumes the queued game action and
@@ -139,24 +141,23 @@ function getFlatCanvas(name) {
   return info;
 }
 
-function F_TextWrite(ctx, dx, dy, dw, dh) {
+export function F_TextWrite(ctx, dx, dy, dw, dh) {
   const background = getFlatCanvas(_finaleFlat);
   if (background !== null) ctx.drawImage(background.canvas, dx, dy, dw, dh);
   else { ctx.fillStyle = V_PaletteCSS(0); ctx.fillRect(dx, dy, dw, dh); }
   const sx = dw / 320, sy = dh / 200;
-  const lineH = 11 * sy;
-  ctx.font = `bold ${lineH}px monospace`;
-  ctx.fillStyle = V_PaletteCSS(256 - 32 + 7);
-  ctx.textAlign = 'left';
   // f_finale.c:F_TextWrite — `count = (finalecount - 10) / TEXTSPEED`
-  // characters revealed so far. Clamped to text length.
-  const maxChars = Math.min(_finaleText.length,
-    Math.max(0, ((_finalecount - F_TEXTSTART) / F_TEXTSPEED) | 0));
-  const visible = _finaleText.slice(0, maxChars);
-  const lines = visible.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], dx + 10 * sx, dy + (10 + i * 11) * sy);
-  }
+  // counts newlines and unsupported characters too. The reference stops the
+  // whole reveal as soon as a proportional glyph would cross SCREENWIDTH.
+  const maxChars = F_GetFinaleTextCount(_finalecount);
+  const layout = HU_LayoutText(_finaleText, HU_GetFont(), {
+    x: 10,
+    y: 10,
+    maxChars,
+    lineHeight: 11,
+    maxX: 320,
+  });
+  HU_DrawLayout(ctx, layout, dx, dy, sx, sy);
 }
 
 // F_BunnyScroll — E3 ending. Two 320-wide images (PFUB1 + PFUB2) scroll
@@ -231,6 +232,11 @@ export function F_CastResponder(ev) {
   if (sound !== 0) S_StartSound(null, sound);
   return true;
 }
+export function F_CastPrint(ctx, text, dx, dy, dw, dh) {
+  const sx = dw / 320, sy = dh / 200;
+  const layout = HU_LayoutCenteredText(text, HU_GetFont(), 160, 180);
+  HU_DrawLayout(ctx, layout, dx, dy, sx, sy);
+}
 export function F_CastDrawer(ctx, dx, dy, dw, dh) {
   if (!_castActive || _cast === null) return;
   const sx = dw / 320, sy = dh / 200;
@@ -239,12 +245,9 @@ export function F_CastDrawer(ctx, dx, dy, dw, dh) {
   // Background — use BOSSBACK if present (Doom 2 only), else solid.
   const bg = getPatch('BOSSBACK');
   if (bg !== null) ctx.drawImage(bg.canvas, dx, dy, bg.w * sx, bg.h * sy);
-  // Monster name as a centred label.
+  // f_finale.c:F_CastPrint centers proportional STCFN patches at y=180.
   const cast = F_GetCastDisplay(_cast);
-  ctx.fillStyle = V_PaletteCSS(256 - 32 + 7);
-  ctx.font = `bold ${Math.round(dh * 0.06)}px monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(cast.name, dx + dw * 0.5, dy + dh * 0.92);
+  F_CastPrint(ctx, cast.name, dx, dy, dw, dh);
   // f_finale.c:F_CastDrawer selects rotation 0 from the actual spriteframe,
   // including its flip bit; names such as POSSA0 cannot represent every state.
   const spriteDef = sprites?.[cast.state.sprite];
@@ -265,6 +268,5 @@ export function F_CastDrawer(ctx, dx, dy, dw, dh) {
       ctx.drawImage(sp.canvas, x, y, sp.w * sx, sp.h * sy);
     }
   }
-  ctx.textAlign = 'left';
 }
 export function F_CastActive() { return _castActive; }

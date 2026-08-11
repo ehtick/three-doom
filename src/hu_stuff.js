@@ -3,33 +3,23 @@
 
 import { players, consoleplayer, gameepisode, gamemap, gamemode } from './doomstat.js';
 import { GameMode_t } from './doomdef.js';
-import { V_DecodePatchToCanvas } from './v_video.js';
 import { MSGON, MSGOFF } from './d_englsh.js';
+import {
+  HU_DrawLayout, HU_FONTEND, HU_FONTSIZE, HU_FONTSTART, HU_GetFont,
+  HU_LayoutText, HU_ShutdownFont,
+} from './hu_font.js';
 
 // hu_stuff.c:showMessages — when false, gameplay messages are suppressed.
 // The toggle's own confirmation message is forced through regardless
 // (vanilla's message_dontfuckwithme).
 export let showMessages = true;
 
-export const HU_FONTSTART = '!'.charCodeAt(0);  // 33
-export const HU_FONTEND   = '_'.charCodeAt(0);  // 95
-export const HU_FONTSIZE  = HU_FONTEND - HU_FONTSTART + 1;
+export { HU_FONTSTART, HU_FONTEND, HU_FONTSIZE };
 export const HU_MSGX      = 0;
 export const HU_MSGY      = 0;
 export const HU_TITLEX    = 0;
 export const HU_TITLEY    = 167 - 12; // bottom of view, above STBAR
 export const HU_MSGTIMEOUT = 4 * 35;
-
-const hu_font = new Array(HU_FONTSIZE);
-let _fontLoaded = false;
-function ensureFont() {
-  if (_fontLoaded) return;
-  for (let i = 0; i < HU_FONTSIZE; i++) {
-    const idx = HU_FONTSTART + i;
-    hu_font[i] = V_DecodePatchToCanvas(`STCFN${String(idx).padStart(3, '0')}`);
-  }
-  _fontLoaded = true;
-}
 
 // Episode 1 level titles (shareware/registered). Doom 2 titles go in MAPNN slots.
 const HU_TITLES_E1 = [
@@ -86,8 +76,7 @@ let _lastMo       = null;
 export function HU_Init() { /* fonts loaded lazily on first draw */ }
 
 export function HU_Shutdown() {
-  hu_font.fill(null);
-  _fontLoaded = false;
+  HU_ShutdownFont();
   _msgText = '';
   _msgCounter = 0;
   _titleCounter = 0;
@@ -137,24 +126,8 @@ export function HU_Responder(_ev) { return false; }
 // Render one string at virtual (vx, vy) using the loaded STCFN font.
 function drawText(ctx, text, vx, vy, dstX, dstY, sx, sy) {
   if (text === '' || text === null) return;
-  let cx = vx;
-  for (let i = 0; i < text.length; i++) {
-    let code = text.charCodeAt(i);
-    if (code === 32) { cx += 4; continue; } // space
-    if (code >= 97 && code <= 122) code -= 32; // uppercase
-    const idx = code - HU_FONTSTART;
-    if (idx < 0 || idx >= HU_FONTSIZE) { cx += 4; continue; }
-    const g = hu_font[idx];
-    if (g === null || g === undefined) { cx += 4; continue; }
-    ctx.drawImage(
-      g.canvas,
-      dstX + (cx - g.leftoffset) * sx,
-      dstY + (vy - g.topoffset)  * sy,
-      g.w * sx,
-      g.h * sy
-    );
-    cx += g.w;
-  }
+  const layout = HU_LayoutText(text, HU_GetFont(), { x: vx, y: vy });
+  HU_DrawLayout(ctx, layout, dstX, dstY, sx, sy);
 }
 
 // HU_Drawer renders messages on top of the 3D view; the STBAR is drawn separately
@@ -162,7 +135,6 @@ function drawText(ctx, text, vx, vy, dstX, dstY, sx, sy) {
 export function HU_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   const p = players[consoleplayer];
   if (p === null || p === undefined || p.mo === null) return;
-  ensureFont();
   const sx = dstW / 320;
   const sy = dstH / 200;
   // Pickup / item / secret message at top-left.

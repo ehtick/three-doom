@@ -65,6 +65,13 @@ export function F_ShouldAdvanceCommercial(finaleCount, buttons) {
   return finaleCount > 50 && buttons.some((value) => value !== 0);
 }
 
+// f_finale.c:F_TextWrite reveals one source character every three tics after
+// its ten-tic lead-in. C integer division truncates toward zero before the
+// negative result is clamped, which matters at the lead-in boundary.
+export function F_GetFinaleTextCount(finaleCount) {
+  return Math.max(0, Math.trunc((finaleCount - 10) / 3));
+}
+
 // f_finale.c:F_BunnyScroll uses C integer division before subtracting the
 // half-speed offset from 320. Truncating the final subtraction instead moves
 // the panorama one pixel early on every odd tic.
