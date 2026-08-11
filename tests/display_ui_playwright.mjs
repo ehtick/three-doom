@@ -58,7 +58,12 @@ try {
 
     try {
       calls.length = 0;
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // A newly spawned weapon begins below the view and rises at 35 Hz. Wait
+      // for the first actually drawn patch instead of assuming two high-refresh
+      // RAFs contain a simulation tic.
+      for (let i = 0; i < 180 && !calls.includes('psprite'); i++) {
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
       const normalCalls = [...calls];
 
       automap.AM_Start();
@@ -70,7 +75,11 @@ try {
         active: doomstat.automapactive,
         normalCalls,
         automapCalls,
-        automapRect: automapRects.at(-1),
+        // AM_Drawer now also paints the player arrow and center crosshair with
+        // fillRect. Select the full logical map clear, not the last tiny mark.
+        automapRect: automapRects.reduce((largest, rect) =>
+          largest === undefined || rect[2] * rect[3] > largest[2] * largest[3]
+            ? rect : largest, undefined),
       };
       automap.AM_Stop();
 
