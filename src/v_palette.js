@@ -8,6 +8,7 @@ const V_PALETTE_COLORS = 256;
 const RGB_BYTES = V_PALETTE_COLORS * 3;
 const RGBA_BYTES = V_PALETTE_COLORS * 4;
 const _playpalRGBA = new Uint8Array(V_PALETTE_COUNT * RGBA_BYTES);
+const _rawPlaypalRGB = new Uint8Array(V_PALETTE_COUNT * RGB_BYTES);
 
 let _activeIndex = 0;
 let _revision = 0;
@@ -16,17 +17,24 @@ let _initialized = false;
 // Accept either PLAYPAL's full 14-palette lump or one RGB palette. A lone
 // palette is mirrored into every slot because there is no alternate flash
 // palette data to select in that form.
-export function V_InitPlaypal(rgbBytes) {
+export function V_InitPlaypal(rgbBytes, gammaTable = null) {
   const fullPlaypal = rgbBytes.length >= V_PALETTE_COUNT * RGB_BYTES;
+  const gamma = gammaTable !== null && gammaTable.length >= V_PALETTE_COLORS
+    ? gammaTable
+    : null;
   for (let p = 0; p < V_PALETTE_COUNT; p++) {
     const srcBase = fullPlaypal ? p * RGB_BYTES : 0;
+    const rawBase = p * RGB_BYTES;
     const dstBase = p * RGBA_BYTES;
     for (let i = 0; i < V_PALETTE_COLORS; i++) {
       const src = srcBase + i * 3;
+      const raw = rawBase + i * 3;
       const dst = dstBase + i * 4;
-      _playpalRGBA[dst + 0] = rgbBytes[src + 0] ?? 0;
-      _playpalRGBA[dst + 1] = rgbBytes[src + 1] ?? 0;
-      _playpalRGBA[dst + 2] = rgbBytes[src + 2] ?? 0;
+      for (let channel = 0; channel < 3; channel++) {
+        const value = rgbBytes[src + channel] ?? 0;
+        _rawPlaypalRGB[raw + channel] = value;
+        _playpalRGBA[dst + channel] = gamma === null ? value : gamma[value];
+      }
       _playpalRGBA[dst + 3] = 255;
     }
   }
@@ -79,14 +87,13 @@ export function V_PaletteCSS(index, alpha = 1) {
 // External RGB art has no source palette index. Quantize it once against
 // PLAYPAL 0, after which normal palette selection can remap it exactly.
 export function V_FindClosestBasePaletteIndex(r, g, b) {
-  const base = V_GetPalette(0);
   let bestIndex = 0;
   let bestDistance = Infinity;
   for (let i = 0; i < V_PALETTE_COLORS; i++) {
-    const offset = i * 4;
-    const dr = r - base[offset + 0];
-    const dg = g - base[offset + 1];
-    const db = b - base[offset + 2];
+    const offset = i * 3;
+    const dr = r - _rawPlaypalRGB[offset + 0];
+    const dg = g - _rawPlaypalRGB[offset + 1];
+    const db = b - _rawPlaypalRGB[offset + 2];
     const distance = dr * dr + dg * dg + db * db;
     if (distance < bestDistance) {
       bestDistance = distance;

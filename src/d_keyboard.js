@@ -6,6 +6,7 @@
 
 import { renderer, I_RegisterGraphicsShutdownHook } from './i_video.js';
 import { BT_CHANGE, BT_SPECIAL, BTS_PAUSE, BT_WEAPONSHIFT } from './d_event.js';
+import { KEY_F11 } from './doomdef.js';
 import { D_ComputeMovement, D_MouseStrafePressed } from './d_input_logic.js';
 
 // Cache cross-module references at module load — keystrokes are a hot path
@@ -130,12 +131,13 @@ async function onKeyDown(e) {
       }
       // Menu — Esc opens/closes; while menu is open or a modal is up, route
       // arrows / Enter / Backspace / y / n through M_Responder.
-      else if (e.code === 'Escape' || ds.menuactive) {
+      else if (e.code === 'Escape' || e.code === 'F11' || ds.menuactive) {
         const m = await import('./m_menu.js');
         if (listenerIsActive(generation) !== true) return;
         const codeToKey = {
           Escape: 27, Enter: 13, NumpadEnter: 13, Backspace: 127 /*KEY_BACKSPACE*/,
           ArrowUp: 0xad, ArrowDown: 0xaf, ArrowLeft: 0xac, ArrowRight: 0xae,
+          F11: KEY_F11,
           KeyY: 0x79, KeyN: 0x6e,
         };
         const data1 = codeToKey[e.code];

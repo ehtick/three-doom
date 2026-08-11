@@ -9,9 +9,12 @@
 // The 3D port draws menus via Canvas2D using the WAD's M_* patches when
 // available, falling back to a monospace font for items.
 
-import { menuactive, set_menuactive, gamestate, gamemode, demoplayback } from './doomstat.js';
+import {
+  menuactive, set_menuactive, gamestate, gamemode, demoplayback,
+  players, consoleplayer,
+} from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
-  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER } from './doomdef.js';
+  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_F11 } from './doomdef.js';
 import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
@@ -20,9 +23,16 @@ import { S_StartSound } from './s_sound.js';
 import { sfx_pstop, sfx_pistol, sfx_stnmov, sfx_swtchn, sfx_swtchx } from './sounds.js';
 import { HU_ToggleMessages, showMessages } from './hu_stuff.js';
 import { D_AcquirePointerLock } from './d_keyboard.js';
-import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas, V_RegisterPNGPatch } from './v_video.js';
+import {
+  gammatable, set_usegamma, usegamma,
+  V_DecodePatchToCanvas, V_DrawPatchAtCanvas, V_RegisterPNGPatch,
+} from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
+import { I_SetPalette } from './i_video.js';
+import { W_CacheLumpName } from './w_wad.js';
+import { GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4 } from './d_englsh.js';
 const getPatch = V_DecodePatchToCanvas;
+const GAMMA_MESSAGES = [GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4];
 
 // M_CONT isn't a WAD lump; it's a user-supplied PNG in the project root for
 // the in-game "Continue" entry. Load it asynchronously — until it's ready
@@ -316,6 +326,17 @@ export function M_Responder(ev) {
     // m_menu.c:1507 — any dismissal of a modal message plays sfx_swtchx.
     if (key === 0x79 /*y*/ || key === 13) { _message.routine?.(true);  _message = null; S_StartSound(null, sfx_swtchx); return true; }
     if (key === 0x6e /*n*/ || key === KEY_ESCAPE) { _message.routine?.(false); _message = null; S_StartSound(null, sfx_swtchx); return true; }
+    return true;
+  }
+  // m_menu.c:1597-1603 — F11 is a global shortcut while the menu is closed.
+  // Re-uploading PLAYPAL resets the active damage/bonus palette just like the
+  // original I_SetPalette call; ST_doPaletteStuff can select it again next tic.
+  if (key === KEY_F11 && menuactive !== true) {
+    const gamma = (usegamma + 1) % gammatable.length;
+    set_usegamma(gamma);
+    const player = players[consoleplayer];
+    if (player !== null && player !== undefined) player.message = GAMMA_MESSAGES[gamma];
+    I_SetPalette(W_CacheLumpName('PLAYPAL', 0));
     return true;
   }
   if (key === KEY_ESCAPE) {

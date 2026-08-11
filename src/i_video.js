@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { SCREENWIDTH, SCREENHEIGHT, KEY_LEFTARROW, KEY_RIGHTARROW, KEY_UPARROW, KEY_DOWNARROW, KEY_ESCAPE, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_PAUSE, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_RSHIFT, KEY_RCTRL, KEY_RALT } from './doomdef.js';
 import { evtype_t, D_PostEvent } from './d_event.js';
-import { screens } from './v_video.js';
+import { gammatable, screens, usegamma } from './v_video.js';
 import {
   V_GetActivePalette, V_InitPlaypal, V_IsPlaypalReady,
   V_PaletteCSS, V_SetPaletteIndex,
@@ -337,7 +337,7 @@ function resize() {
 // Takes one 768-byte RGB palette or PLAYPAL's complete 14-palette lump and
 // publishes it to both the Canvas and WebGL indexed renderers.
 export function I_SetPalette(rgbBytes) {
-  R_SetPlaypal(V_InitPlaypal(rgbBytes));
+  R_SetPlaypal(V_InitPlaypal(rgbBytes, gammatable[usegamma]));
   I_SetPaletteIndex(0);
 }
 

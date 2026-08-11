@@ -3,6 +3,7 @@ import {
   V_GetPaletteIndex, V_GetPaletteRevision, V_InitPlaypal, V_PaletteCSS,
   V_SetPaletteIndex,
 } from '../src/v_palette.js';
+import { gammatable } from '../src/v_video.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -72,5 +73,39 @@ Deno.test('PLAYPAL selection preserves exact RGB entries for every flash class',
     assertEquals(V_GetActivePalette()[baseOffset + 0], V_GetPalette(0)[baseOffset + 0], `single red ${index}`);
     assertEquals(V_GetActivePalette()[baseOffset + 1], V_GetPalette(0)[baseOffset + 1], `single green ${index}`);
     assertEquals(V_GetActivePalette()[baseOffset + 2], V_GetPalette(0)[baseOffset + 2], `single blue ${index}`);
+  }
+});
+
+Deno.test('PLAYPAL channels pass through every Doom gamma table exactly', () => {
+  const rgb = new Uint8Array(14 * 256 * 3);
+  for (let i = 0; i < rgb.length; i++) rgb[i] = (i * 37 + 11) & 255;
+
+  for (let gamma = 0; gamma < gammatable.length; gamma++) {
+    V_InitPlaypal(rgb, gammatable[gamma]);
+    for (const paletteIndex of [0, 8, 13]) {
+      V_SetPaletteIndex(paletteIndex);
+      const actual = V_GetActivePalette();
+      for (const colorIndex of [0, 1, 63, 127, 255]) {
+        for (let channel = 0; channel < 3; channel++) {
+          const source = rgb[paletteIndex * 768 + colorIndex * 3 + channel];
+          const expected = gammatable[gamma][source];
+          const value = actual[colorIndex * 4 + channel];
+          if (value !== expected) {
+            throw new Error(
+              `gamma=${gamma} palette=${paletteIndex} color=${colorIndex} channel=${channel}: ` +
+              `expected ${expected}, got ${value}`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // PNG/source quantization must stay in raw PLAYPAL index space so loading
+  // an asset after an F11 change cannot choose a different source index.
+  const sourceIndex = 53;
+  const source = sourceIndex * 3;
+  if (V_FindClosestBasePaletteIndex(rgb[source], rgb[source + 1], rgb[source + 2]) !== sourceIndex) {
+    throw new Error('gamma-adjusted presentation changed base-palette quantization');
   }
 });

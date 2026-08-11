@@ -518,13 +518,14 @@ export async function D_DoomMain() {
   V_Init();
   I_InitGraphics();
 
-  // Palette — Doom keeps 14 palettes in PLAYPAL; I_SetPalette handles both
-  // the single-palette and full-PLAYPAL forms.
+  // Doom keeps 14 palettes in PLAYPAL. R_InitData needs the palette to create
+  // its shared shader texture; I_SetPalette immediately replaces that initial
+  // upload with the selected Doom gamma table for every compositor.
   const playpal = W_CacheLumpName('PLAYPAL', 0);
-  I_SetPalette(playpal);
 
   // Init rendering data (textures/flats/sprites/colormaps).
   R_InitData();
+  I_SetPalette(playpal);
   (await import('./r_data.js')).R_InitDefaultAnims();
   // Build sprite definitions (one entry per SPR_* name).
   const RT = await import('./r_things.js');
