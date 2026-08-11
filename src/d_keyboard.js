@@ -124,40 +124,43 @@ async function onKeyDown(e) {
           return;
         }
       }
-      // Single-shot automap controls.
-      if (e.code === 'Tab') {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Toggle();
-      } else if (e.code === 'Equal' || e.code === 'NumpadAdd') {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: 0, data1: 0x2b });
-      } else if (e.code === 'Minus' || e.code === 'NumpadSubtract') {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: 0, data1: 0x2d });
-      } else if (e.code === 'KeyF') {
-        const am = await import('./am_map.js');
-        if (listenerIsActive(generation) !== true) return;
-        am.AM_Responder({ type: 0, data1: 0x66 });
-      }
-      // Cheat sequencer — feed each lowercase letter through the table.
-      else if (e.code.startsWith('Key')) {
+      // st_stuff.c's cheat sequencer runs before AM_Responder. Every letter
+      // must reach it, including F/M/C that automap may also consume.
+      if (e.code.startsWith('Key')) {
         const ch = e.code.charAt(3).toLowerCase().charCodeAt(0);
         const cheat = await import('./m_cheat.js');
         if (listenerIsActive(generation) !== true) return;
         cheat.cht_HandleKey(ch);
-      }
-      // Weapon digits are sampled into BT_CHANGE by buildCmd, so recordings
-      // carry the switch in the ticcmd instead of mutating pendingweapon here.
-      if (e.code.startsWith('Digit')) {
-        // Vanilla ST_Responder feeds every key (digits included) to the cheat
-        // sequencer; without this IDMUS could never collect its 2-digit param.
+      } else if (e.code.startsWith('Digit')) {
+        // Vanilla ST_Responder feeds digits too (e.g. IDMUS parameters).
         const digCh = e.code.slice(5).charCodeAt(0); // '0'..'9'
         const cheat = await import('./m_cheat.js');
         if (listenerIsActive(generation) !== true) return;
         cheat.cht_HandleKey(digCh);
+      }
+
+      // Single-shot automap controls. Only Tab starts a closed automap;
+      // zoom/follow/mark/clear belong exclusively to an active automap.
+      if (e.code === 'Tab') {
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: evtype_t.ev_keydown, data1: 9 });
+      } else if (doomstat.automapactive === true &&
+                 (e.code === 'Equal' || e.code === 'NumpadAdd')) {
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: 0, data1: 0x2b });
+      } else if (doomstat.automapactive === true &&
+                 (e.code === 'Minus' || e.code === 'NumpadSubtract')) {
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        am.AM_Responder({ type: 0, data1: 0x2d });
+      } else if (doomstat.automapactive === true &&
+                 (e.code === 'KeyF' || e.code === 'KeyM' || e.code === 'KeyC')) {
+        const am = await import('./am_map.js');
+        if (listenerIsActive(generation) !== true) return;
+        const key = e.code === 'KeyF' ? 0x66 : e.code === 'KeyM' ? 0x6d : 0x63;
+        am.AM_Responder({ type: evtype_t.ev_keydown, data1: key });
       }
 }
 

@@ -11,11 +11,11 @@
 
 import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
-  players, consoleplayer,
+  automapactive, players, consoleplayer,
   mouseSensitivity, set_mouseSensitivity,
 } from './doomstat.js';
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
-  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_F11 } from './doomdef.js';
+  KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F11 } from './doomdef.js';
 import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
@@ -326,6 +326,14 @@ export function M_Responder(ev) {
     // m_menu.c:1507 — any dismissal of a modal message plays sfx_swtchx.
     if (key === 0x79 /*y*/ || key === 13) { _message.routine?.(true);  _message = null; S_StartSound(null, sfx_swtchx); return true; }
     if (key === 0x6e /*n*/ || key === KEY_ESCAPE) { _message.routine?.(false); _message = null; S_StartSound(null, sfx_swtchx); return true; }
+    return true;
+  }
+  // m_menu.c:1522-1534 — closed-map +/- are global view-size shortcuts.
+  // When automap is active M_Responder declines them so AM_Responder can zoom.
+  if (menuactive !== true && automapactive !== true &&
+      (key === KEY_MINUS || key === KEY_EQUALS || key === 0x2b /*numpad +*/)) {
+    M_SizeDisplay(key === KEY_MINUS ? 0 : 1);
+    S_StartSound(null, sfx_stnmov);
     return true;
   }
   // m_menu.c:1597-1603 — F11 is a global shortcut while the menu is closed.

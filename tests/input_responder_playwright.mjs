@@ -34,6 +34,8 @@ try {
 
   const result = await page.evaluate(async () => {
     const keyboard = await import('/src/d_keyboard.js');
+    await import('/src/am_map.js');
+    await import('/src/m_cheat.js');
     const events = await import('/src/d_event.js');
     const doomstat = await import('/src/doomstat.js');
     const finale = await import('/src/f_finale.js');
@@ -227,8 +229,33 @@ try {
     const castWasActive = finale.F_CastActive();
     finale.F_Shutdown();
     doomstat.set_gamestate(0 /*GS_LEVEL*/);
-
     const netgameDuringCheck = doomstat.netgame;
+    doomstat.set_netgame(false);
+
+    // Closed-map minus belongs to M_Responder's view-size shortcut. Once Tab
+    // opens automap, every IDFA letter still reaches the cheat sequencer and F
+    // then fans out to the active map responder.
+    const blocksBeforeMinus = menu.getScreenblocks();
+    key('keydown', 'Minus', '-');
+    key('keyup', 'Minus', '-');
+    const blocksAfterMinus = menu.getScreenblocks();
+    const mapBeforeTab = doomstat.automapactive;
+    key('keydown', 'Tab', 'Tab');
+    key('keyup', 'Tab', 'Tab');
+    for (const [code, value] of [['KeyI', 'i'], ['KeyD', 'd'], ['KeyF', 'f'], ['KeyA', 'a']]) {
+      key('keydown', code, value);
+      key('keyup', code, value);
+    }
+    for (let i = 0; i < 100; i++) {
+      if (doomstat.automapactive === true &&
+          doomstat.players[doomstat.consoleplayer]?.armorpoints === 200) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const mapAfterIdfa = doomstat.automapactive;
+    const armorAfterIdfa = doomstat.players[doomstat.consoleplayer]?.armorpoints;
+    key('keydown', 'Tab', 'Tab');
+    key('keyup', 'Tab', 'Tab');
+
     keyboard.D_KeyboardInput.shutdown();
     doomstat.set_netgame(false);
     doomstat.set_mouseSensitivity(5);
@@ -263,6 +290,11 @@ try {
       queuedActionMenu,
       castPause,
       castWasActive,
+      blocksBeforeMinus,
+      blocksAfterMinus,
+      mapBeforeTab,
+      mapAfterIdfa,
+      armorAfterIdfa,
     };
   });
 
@@ -316,6 +348,12 @@ try {
   }
   if (!zero(result.castPause) || result.castWasActive !== true) {
     failures.push(`cast did not consume Pause before ticcmd capture: ${JSON.stringify(result.castPause)}`);
+  }
+  if (result.blocksAfterMinus !== result.blocksBeforeMinus - 1 || result.mapBeforeTab !== false) {
+    failures.push(`closed-map minus routing mismatch: ${result.blocksBeforeMinus} -> ${result.blocksAfterMinus}`);
+  }
+  if (result.mapAfterIdfa !== true || result.armorAfterIdfa !== 200) {
+    failures.push(`IDFA/automap fan-out mismatch: map=${result.mapAfterIdfa}, armor=${result.armorAfterIdfa}`);
   }
   if (pageErrors.length !== 0) failures.push(`page errors: ${pageErrors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

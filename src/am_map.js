@@ -75,13 +75,17 @@ export function AM_Ticker() {
 export function AM_Responder(ev) {
   if (ev === undefined || ev === null) return false;
   if (ev.type !== 0 /*ev_keydown*/) return false;
+  if (!automapactive) {
+    if (ev.data1 === 9 /*KEY_TAB*/) { AM_Start(); return true; }
+    return false;
+  }
   switch (ev.data1) {
-    case 9 /*KEY_TAB*/: AM_Toggle(); return true;
+    case 9 /*KEY_TAB*/: AM_Stop(); return true;
     case 0x2b /*'+'*/:  _scale *= 1.2; return true;
     case 0x2d /*'-'*/:  _scale /= 1.2; return true;
     case 0x66 /*'f'*/:  _followMode = !_followMode; return true;
-    case 0x6d /*'m'*/:  if (automapactive) { AM_addMark();   return true; } return false;
-    case 0x63 /*'c'*/:  if (automapactive) { AM_clearMarks(); return true; } return false;
+    case 0x6d /*'m'*/:  AM_addMark(); return true;
+    case 0x63 /*'c'*/:  AM_clearMarks(); return true;
   }
   return false;
 }
