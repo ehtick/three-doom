@@ -121,7 +121,32 @@ try {
     const deathmatchMiddleMismatch = middleMismatch(deathmatch, expectedMiddle(false));
     doomstat.set_deathmatch(0);
 
-    return { ...percentResult, normalMiddleMismatch, deathmatchMiddleMismatch };
+    function imageMismatch(aCanvas, bCanvas, x, y, width, height) {
+      const a = aCanvas.getContext('2d').getImageData(x, y, width, height).data;
+      const b = bCanvas.getContext('2d').getImageData(x, y, width, height).data;
+      let mismatch = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) mismatch++;
+      return mismatch;
+    }
+    player.cards.fill(false);
+    player.cards[3] = true;
+    const skullOnly = renderStatus();
+    player.cards[0] = true;
+    const cardAndSkull = renderStatus();
+    player.cards[3] = false;
+    const cardOnly = renderStatus();
+    const keyRegion = [238, 168, 12, 13];
+    const combinedVsSkullMismatch = imageMismatch(cardAndSkull, skullOnly, ...keyRegion);
+    const cardVsSkullMismatch = imageMismatch(cardOnly, skullOnly, ...keyRegion);
+    player.cards.fill(false);
+
+    return {
+      ...percentResult,
+      normalMiddleMismatch,
+      deathmatchMiddleMismatch,
+      combinedVsSkullMismatch,
+      cardVsSkullMismatch,
+    };
   });
 
   const failures = [];
@@ -135,6 +160,9 @@ try {
   }
   if (result.normalMiddleMismatch !== 0 || result.deathmatchMiddleMismatch !== 0) {
     failures.push(`middle widgets: ${JSON.stringify(result)}`);
+  }
+  if (result.combinedVsSkullMismatch !== 0 || result.cardVsSkullMismatch === 0) {
+    failures.push(`key override: ${JSON.stringify(result)}`);
   }
   if (errors.length !== 0) failures.push(`page errors: ${errors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

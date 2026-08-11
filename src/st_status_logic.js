@@ -16,3 +16,11 @@ export function ST_DeathmatchStatusPlan(deathmatch, frags, consoleplayer) {
   }
   return { showArms: !active, showFrags: active, fragCount };
 }
+
+// st_stuff.c ST_updateWidgets assigns the card first and then lets the
+// corresponding skull key replace it. Vanilla only loads STKEYS0..5.
+export function ST_KeyPatch(cards, slot) {
+  if (cards?.[slot + 3] === true) return `STKEYS${slot + 3}`;
+  if (cards?.[slot] === true) return `STKEYS${slot}`;
+  return null;
+}

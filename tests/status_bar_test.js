@@ -1,6 +1,6 @@
 import {
   ST_ARMORX, ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX,
-  ST_FRAGSWIDTH, ST_HEALTHX, ST_PERCENT_PATCH,
+  ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from '../src/st_status_logic.js';
 
 function assertEquals(actual, expected, message) {
@@ -35,4 +35,17 @@ Deno.test('deathmatch replaces arms with the reference frag sum widget', () => {
   );
   assertEquals({ x: ST_FRAGSX, y: ST_BIG_NUMBER_Y, width: ST_FRAGSWIDTH },
     { x: 138, y: 171, width: 2 }, 'frag widget geometry');
+});
+
+Deno.test('a skull key overrides its matching card using loaded STKEYS patches', () => {
+  for (let slot = 0; slot < 3; slot++) {
+    const cards = [false, false, false, false, false, false];
+    assertEquals(ST_KeyPatch(cards, slot), null, `empty slot ${slot}`);
+    cards[slot] = true;
+    assertEquals(ST_KeyPatch(cards, slot), `STKEYS${slot}`, `card ${slot}`);
+    cards[slot + 3] = true;
+    assertEquals(ST_KeyPatch(cards, slot), `STKEYS${slot + 3}`, `skull overrides card ${slot}`);
+    cards[slot] = false;
+    assertEquals(ST_KeyPatch(cards, slot), `STKEYS${slot + 3}`, `skull ${slot}`);
+  }
 });

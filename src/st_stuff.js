@@ -11,7 +11,7 @@ import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
 import {
   ST_ARMORX, ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX,
-  ST_FRAGSWIDTH, ST_HEALTHX, ST_PERCENT_PATCH,
+  ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from './st_status_logic.js';
 
 // Patches are decoded + cached centrally in v_video.js (V_DecodePatchToCanvas).
@@ -385,12 +385,7 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
     dstY + ST_BIG_NUMBER_Y * sy, sx, sy, 'STTNUM');
   // 7) Keys — three slots stacked, with skull variants overriding keycards.
   for (let i = 0; i < 3; i++) {
-    const hasKey  = p.cards && p.cards[i] === true;
-    const hasSkul = p.cards && p.cards[i + 3] === true;
-    let lump = null;
-    if (hasSkul && hasKey) lump = `STKEYS${i + 6}`; // composite (Doom 2 only)
-    else if (hasSkul)      lump = `STKEYS${i + 3}`;
-    else if (hasKey)       lump = `STKEYS${i}`;
+    const lump = ST_KeyPatch(p.cards, i);
     if (lump !== null) {
       const k = getPatch(lump);
       if (k !== null) overlayCtx.drawImage(k.canvas, dstX + 239 * sx, dstY + (171 + i * 10) * sy, k.w * sx, k.h * sy);
