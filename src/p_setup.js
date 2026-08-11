@@ -383,6 +383,10 @@ export function P_SetupLevel(episode, map, _playermask, _skill) {
   if (players[consoleplayer] !== undefined && players[consoleplayer] !== null) {
     players[consoleplayer].viewz = 1;
   }
+  // p_setup.c:602-607 — stop old-level channels and start the new music
+  // before purging/initializing level state. Sounds created later during
+  // initial deathmatch placement must survive setup.
+  if (_S_Start !== null) _S_Start();
   // p_setup.c:586 — initialize the thinker list BEFORE loading mobjs.
   P_InitThinkers();
   // Bodyque + intermission queue reset.
@@ -427,7 +431,5 @@ export function P_SetupLevel(episode, map, _playermask, _skill) {
 
   // p_setup.c:633 — spawn special sectors and queue per-tic effects.
   if (_P_SpawnSpecials !== null) _P_SpawnSpecials();
-  // p_setup.c:634 — clear all sounds and (re)start level music.
-  if (_S_Start !== null) _S_Start();
   R_PrecacheLevel();
 }
