@@ -9,7 +9,7 @@ import { P_SetMobjState, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, M
 import { P_TeleportMove, P_CheckPosition } from './p_map.js';
 import { P_BlockThingsIterator } from './p_maputl.js';
 import { bmaporgx, bmaporgy } from './p_setup.js';
-import { players, consoleplayer, playeringame, gameepisode, gamemap, gamemode, gameskill, gametic } from './doomstat.js';
+import { players, consoleplayer, playeringame, gameepisode, gamemap, gamemode, gameskill, gametic, fastparm } from './doomstat.js';
 import { GameMode_t } from './doomdef.js';
 import { ANGLETOFINESHIFT, FINEMASK, finecosine, finesine } from './tables.js';
 import { P_CheckSight } from './p_sight.js';
@@ -310,7 +310,7 @@ P_RegisterAction('A_Chase', (actor) => {
   if ((actor.flags & MF_JUSTATTACKED) !== 0) {
     actor.flags &= ~MF_JUSTATTACKED;
     // Vanilla: !sk_nightmare && !fastparm → re-pick chase dir.
-    if (gameskill !== 4 /*sk_nightmare*/) P_NewChaseDir(actor);
+    if (gameskill !== 4 /*sk_nightmare*/ && !fastparm) P_NewChaseDir(actor);
     return;
   }
   // Melee attack.
@@ -326,7 +326,7 @@ P_RegisterAction('A_Chase', (actor) => {
     // skips the missile check. The C `actor->movecount` is a non-zero test, so
     // movecount === -1 (after the previous tic's --movecount underflow) still
     // skips. Use a non-zero test, not `> 0`, to match.
-    const movecountGate = (gameskill !== 4 && actor.movecount !== 0);
+    const movecountGate = (gameskill < 4 /*sk_nightmare*/ && !fastparm && actor.movecount !== 0);
     if (!movecountGate && P_CheckMissileRange(actor)) {
       P_SetMobjState(actor, actor.info.missilestate);
       actor.flags |= MF_JUSTATTACKED;
