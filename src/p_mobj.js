@@ -253,6 +253,14 @@ const itemrespawnque  = new Array(ITEMQUESIZE);
 const itemrespawntime = new Int32Array(ITEMQUESIZE);
 let iquehead = 0, iquetail = 0;
 
+// p_setup.c clears the altdeath item queue after loading THINGS and placing
+// deathmatch players. Queue entries point into the old level and must never
+// survive a map transition.
+export function P_ResetRespawnQueue() {
+  iquehead = 0;
+  iquetail = 0;
+}
+
 // p_mobj.c:546
 export function P_RemoveMobj(mo) {
   // Queue pickupable items for nightmare-respawn unless dropped / forbidden.

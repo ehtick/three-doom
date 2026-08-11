@@ -681,6 +681,7 @@ export async function D_DoomMain() {
     R_PrecacheLevel,
     P_SpawnMapThing,
     G_DeathMatchSpawnPlayer: _GGame.G_DeathMatchSpawnPlayer,
+    P_ResetRespawnQueue: PM.P_ResetRespawnQueue,
     P_SpawnSpecials: pSpec.P_SpawnSpecials,
     S_Start:         S.S_Start,
   });

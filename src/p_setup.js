@@ -79,6 +79,7 @@ let R_PrecacheLevel     = () => {};
 let _P_SpawnSpecials = null;
 let _S_Start = null;
 let _G_DeathMatchSpawnPlayer = null;
+let _P_ResetRespawnQueue = null;
 
 export function P_SetExternals(refs) {
   if (refs.R_TextureNumForName != null) R_TextureNumForName = refs.R_TextureNumForName;
@@ -89,6 +90,9 @@ export function P_SetExternals(refs) {
   if (refs.S_Start != null)             _S_Start            = refs.S_Start;
   if (refs.G_DeathMatchSpawnPlayer != null) {
     _G_DeathMatchSpawnPlayer = refs.G_DeathMatchSpawnPlayer;
+  }
+  if (refs.P_ResetRespawnQueue != null) {
+    _P_ResetRespawnQueue = refs.P_ResetRespawnQueue;
   }
 }
 
@@ -416,6 +420,10 @@ export function P_SetupLevel(episode, map, _playermask, _skill) {
       _G_DeathMatchSpawnPlayer(i);
     }
   }
+
+  // p_setup.c:676 — discard item-respawn entries from the previous map only
+  // after initial deathmatch placement has completed.
+  if (_P_ResetRespawnQueue !== null) _P_ResetRespawnQueue();
 
   // p_setup.c:633 — spawn special sectors and queue per-tic effects.
   if (_P_SpawnSpecials !== null) _P_SpawnSpecials();
