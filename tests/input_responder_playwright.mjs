@@ -98,17 +98,20 @@ try {
     key('keyup', 'KeyW', 'w');
     const releasedInMenu = sample();
 
-    // M_Responder owns every one of these keydowns while this menu is active;
-    // none may enter movement, attack/use, or weapon bits.
-    key('keydown', 'KeyW', 'w');
-    key('keydown', 'ControlLeft', 'Control');
-    key('keydown', 'Space', ' ');
-    key('keydown', 'Digit3', '3');
+    // Navigation keys consumed by M_Responder must not enter the gameplay
+    // state even while a netgame continues ticking behind the menu.
+    key('keydown', 'ArrowUp', 'ArrowUp');
+    key('keydown', 'ArrowRight', 'ArrowRight');
     const menuKeys = sample();
+    key('keyup', 'ArrowUp', 'ArrowUp');
+    key('keyup', 'ArrowRight', 'ArrowRight');
+
+    // m_menu.c returns false for a key with no matching alphaKey, allowing
+    // G_Responder to see it. W is not a shortcut on MainDef.
+    key('keydown', 'KeyW', 'w');
+    const unsupportedMenuKey = sample();
     key('keyup', 'KeyW', 'w');
-    key('keyup', 'ControlLeft', 'Control');
-    key('keyup', 'Space', ' ');
-    key('keyup', 'Digit3', '3');
+    const unsupportedMenuReleased = sample();
 
     // A menu-consumed mouse press cannot become BT_ATTACK or recapture the
     // pointer; locked motion is likewise unavailable to gameplay.
@@ -286,6 +289,8 @@ try {
       beforeMenu,
       releasedInMenu,
       menuKeys,
+      unsupportedMenuKey,
+      unsupportedMenuReleased,
       menuMouse,
       menuPointerRequests,
       gameplayMouse,
@@ -332,6 +337,13 @@ try {
   if (result.beforeMenu.forwardmove !== 25) failures.push('gameplay keydown was not captured before menu');
   if (!zero(result.releasedInMenu)) failures.push('keyup did not clear movement while menu was open');
   if (!zero(result.menuKeys)) failures.push('menu-consumed keyboard input leaked into ticcmd');
+  if (result.unsupportedMenuKey.forwardmove !== 25 ||
+      !zero(result.unsupportedMenuReleased)) {
+    failures.push(`unsupported menu key did not fall through: ${JSON.stringify({
+      down: result.unsupportedMenuKey,
+      up: result.unsupportedMenuReleased,
+    })}`);
+  }
   if (!zero(result.menuMouse)) failures.push('menu-consumed mouse input leaked into ticcmd');
   if (result.menuPointerRequests !== 0) failures.push('menu mouse press recaptured pointer lock');
   if ((result.gameplayMouse.buttons & 1) === 0) failures.push('gameplay mouse press did not set BT_ATTACK');
