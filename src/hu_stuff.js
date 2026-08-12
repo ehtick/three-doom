@@ -11,7 +11,7 @@ import {
   HU_AdvanceMessageState, HU_EmptyMessageState, HU_ForceNextMessage,
   HU_InstallMessageState, HU_MSGTIMEOUT,
 } from './hu_message_logic.js';
-import { HU_LevelTitle } from './hu_title.js';
+import { HU_LevelTitle, HU_TitleYForFontHeight } from './hu_title.js';
 
 // hu_stuff.c:showMessages — when false, gameplay messages are suppressed.
 // The toggle's own confirmation message is forced through regardless
@@ -26,7 +26,7 @@ export { HU_FONTSTART, HU_FONTEND, HU_FONTSIZE };
 export const HU_MSGX      = 0;
 export const HU_MSGY      = 0;
 export const HU_TITLEX    = 0;
-export const HU_TITLEY    = 167 - 12; // bottom of view, above STBAR
+export let HU_TITLEY      = 167; // initialized from STCFN033 in HU_Start
 export { HU_MSGTIMEOUT };
 
 // State.
@@ -49,6 +49,7 @@ export function HU_Start() {
   _msgState = HU_EmptyMessageState();
   // hu_stuff.c:440-470 builds the title widget once per HU_Start. It has no
   // timeout; HU_Drawer gates the persistent line on automapactive.
+  HU_TITLEY = HU_TitleYForFontHeight(HU_GetFont()[0].h);
   _titleText = HU_LevelTitle(gamemode, gameepisode, gamemap);
 }
 

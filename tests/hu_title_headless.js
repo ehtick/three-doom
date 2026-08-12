@@ -34,6 +34,7 @@ function fontGlyph(font, code) {
 }
 
 function drawReferenceTitle(ctx, text, font) {
+  const expectedTitleY = 160;
   let x = 0;
   for (let i = 0; i < text.length; i++) {
     const glyph = fontGlyph(font, text.charCodeAt(i));
@@ -44,7 +45,7 @@ function drawReferenceTitle(ctx, text, font) {
     ctx.drawImage(
       glyph.canvas,
       x - glyph.leftoffset,
-      HU_TITLEY - glyph.topoffset,
+      expectedTitleY - glyph.topoffset,
       glyph.w,
       glyph.h,
     );
@@ -76,6 +77,7 @@ async function run() {
   W_InitMultipleFiles([{ name: 'doom1.wad', buffer: wad }]);
   V_InitPlaypal(W_CacheLumpName('PLAYPAL', 0));
   const font = HU_GetFont();
+  assertEquals(font[0].h, 7, 'bundled STCFN033 height');
 
   players[0] = { mo: {}, cmd: { buttons: 0 }, message: '' };
   set_gamemode(GameMode_t.shareware);
@@ -83,6 +85,7 @@ async function run() {
   set_gamemap(1);
   set_automapactive(false);
   HU_Start();
+  assertEquals(HU_TITLEY, 160, 'HU_Start title baseline');
 
   const firstPerson = makeCanvas();
   HU_Drawer(firstPerson.ctx, 0, 0, 320, 200);

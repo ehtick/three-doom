@@ -4,6 +4,7 @@ import {
   HU_DOOM2_TITLES,
   HU_DOOM_TITLES,
   HU_LevelTitle,
+  HU_TitleYForFontHeight,
 } from '../src/hu_title.js';
 
 function assertEquals(actual, expected, message) {
@@ -49,4 +50,10 @@ Deno.test('title selection follows HU_Start mode defaults and bounds', () => {
   assertEquals(HU_LevelTitle(GameMode_t.retail, 5, 1), '', 'invalid Doom episode');
   assertEquals(HU_LevelTitle(GameMode_t.retail, 2, 0), '', 'invalid Doom map');
   assertEquals(HU_LevelTitle(GameMode_t.commercial, 1, 33), '', 'invalid Doom II map');
+});
+
+Deno.test('automap title baseline follows the first WAD font patch height', () => {
+  assertEquals(HU_TitleYForFontHeight(7), 160, 'bundled STCFN033 height');
+  assertEquals(HU_TitleYForFontHeight(12), 155, 'synthetic twelve-pixel font');
+  assertEquals(HU_TitleYForFontHeight(1), 166, 'synthetic one-pixel font');
 });

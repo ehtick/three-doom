@@ -31,6 +31,11 @@ export const HU_DOOM2_TITLES = Object.freeze([
   english.HUSTR_29, english.HUSTR_30, english.HUSTR_31, english.HUSTR_32,
 ]);
 
+// hu_stuff.c:HU_TITLEY = 167 - SHORT(hu_font[0]->height).
+export function HU_TitleYForFontHeight(height) {
+  return 167 - Math.trunc(height);
+}
+
 export function HU_LevelTitle(gamemode, episode, map) {
   if (!Number.isInteger(map)) return '';
 
