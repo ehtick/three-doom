@@ -22,6 +22,8 @@ try {
 
   const result = await page.evaluate(async () => {
     const menu = await import('/src/m_menu.js');
+    const doomstat = await import('/src/doomstat.js');
+    const { KEY_F10 } = await import('/src/doomdef.js');
     const { HU_FONTSTART, HU_GetFont } = await import('/src/hu_font.js');
     const loop = await import('/src/d_loop.js');
     loop.D_DoomRafLoop.stop();
@@ -90,10 +92,26 @@ try {
     };
     menu.M_StopMessage();
     menu.M_ClearMenus();
+
+    // The C selector reaches its compiled-table debug entry on gametic 19.
+    // Exercise F10 so this also proves m_menu reads doomstat's live binding.
+    doomstat.set_gametic(19);
+    menu.M_Responder({ type: 0, data1: KEY_F10 });
+    const quitText = 'THIS IS NO MESSAGE!\nPage intentionally left blank.' +
+      '\n\n(Press y or click to quit)';
+    const actualQuit = canvas();
+    menu.M_Drawer(actualQuit.getContext('2d'), 0, 0, 320, 200);
+    const expectedQuit = canvas();
+    drawReference(expectedQuit.getContext('2d'), quitText, HU_GetFont());
+    result.quitMismatch = mismatchCount(actualQuit, expectedQuit);
+    result.quitOpaque = opaquePixels(actualQuit);
+    menu.M_StopMessage();
+    menu.M_ClearMenus();
     return result;
   });
 
-  if (result.mismatch !== 0 || result.opaque === 0 || errors.length !== 0) {
+  if (result.mismatch !== 0 || result.opaque === 0 ||
+      result.quitMismatch !== 0 || result.quitOpaque === 0 || errors.length !== 0) {
     throw new Error(JSON.stringify({ result, errors }));
   }
   console.log(JSON.stringify(result));

@@ -12,6 +12,7 @@
 import {
   menuactive, set_menuactive, gamestate, gamemode, demoplayback,
   usergame, netgame, automapactive, players, consoleplayer,
+  gametic,
   mouseSensitivity, set_mouseSensitivity,
   snd_SfxVolume as sfxVolume, snd_MusicVolume as musicVolume,
 } from './doomstat.js';
@@ -47,7 +48,9 @@ import {
   NETEND, NEWGAME,
 } from './d_englsh.js';
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
-import { M_ConfirmQuit, QUIT_CONFIRM_KEY } from './m_menu_quit_logic.js';
+import {
+  M_ConfirmQuit, M_QuitMessageForTic, QUIT_CONFIRM_KEY,
+} from './m_menu_quit_logic.js';
 import { M_ALPHA_KEYS, M_FindAlphaItem } from './m_menu_alpha_logic.js';
 import { M_RestoreMainCursor } from './m_menu_cursor_logic.js';
 import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
@@ -433,15 +436,6 @@ function _saveSlot(slot) {
 }
 
 // ---------- Quit ----------
-const QUIT_MESSAGES = [
-  'please don\'t leave, there\'s more\ndemons to toast!',
-  'let\'s beat it -- this is turning\ninto a bloodbath!',
-  'i wouldn\'t leave if i were you.\nDOS is much worse.',
-  'you\'re trying to say you like DOS\nbetter than me, right?',
-  'don\'t leave yet -- there\'s a\ndemon around that corner!',
-  'ya know, next time you come in here\ni\'m gonna toast ya.',
-  'go ahead and leave. see if i care.',
-];
 const _quitLinkState = { linkOpened: false };
 function M_QuitResponse(key) {
   M_ConfirmQuit(
@@ -453,10 +447,8 @@ function M_QuitResponse(key) {
 }
 function M_QuitDOOM() {
   // m_menu.c:1105 — deterministic by gametic so it's reproducible per session.
-  const gametic = (globalThis.__doom_gametic | 0);
-  const idx = (gametic % (QUIT_MESSAGES.length - 1)) + 1;
   M_StartMessage(
-    QUIT_MESSAGES[idx % QUIT_MESSAGES.length] + '\n\n(Press y or click to quit)',
+    M_QuitMessageForTic(gametic) + '\n\n(Press y or click to quit)',
     M_QuitResponse,
     true,
     QUIT_CONFIRM_KEY,
