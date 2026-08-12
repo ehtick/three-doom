@@ -2,6 +2,8 @@ import * as doomstat from '../src/doomstat.js';
 import {
   R_CalculateCanvasView,
   R_CalculateViewSize,
+  R_CAMERA_FAR,
+  R_CAMERA_NEAR,
   R_DoomVerticalFov,
   R_GetScreenblocks,
   R_SetViewSize,
@@ -25,6 +27,17 @@ const REFERENCE_VIEWS = [
   [10, 320, 168, 0, 0],
   [11, 320, 200, 0, 0],
 ];
+
+Deno.test('Three camera clipping covers the complete signed-short map volume', () => {
+  // Use the full 65,536-unit fixed-point span conservatively; camera and mobj
+  // coordinates can occupy the fractional endpoints around signed map data.
+  const maxMapSpan = Math.hypot(65536, 65536, 65536);
+  assertEquals(R_CAMERA_NEAR, 1, 'camera near plane');
+  assertEquals(R_CAMERA_FAR, 131072, 'camera far plane');
+  if (R_CAMERA_FAR <= maxMapSpan) {
+    throw new Error(`far plane ${R_CAMERA_FAR} does not cover ${maxMapSpan}`);
+  }
+});
 
 Deno.test('screenblocks 3 through 11 reproduce R_ExecuteSetViewSize exactly', () => {
   for (const [blocks, width, height, x, y] of REFERENCE_VIEWS) {

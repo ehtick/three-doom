@@ -464,9 +464,35 @@ try {
       288,
     );
     sky.R_UpdateSky();
+
+    // A custom-map surface beyond the port's old 16,384-unit far plane must
+    // remain visible. Render with a clone of the production camera so this
+    // checks both its configured range and WebGL clipping behavior.
+    const farScene = new THREE.Scene();
+    const farCamera = window.camera.clone();
+    farCamera.position.set(0, 0, 0);
+    farCamera.rotation.set(0, 0, 0);
+    const farGeometry = new THREE.PlaneGeometry(2000, 2000);
+    const farMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const farMesh = new THREE.Mesh(farGeometry, farMaterial);
+    farMesh.position.z = -120000;
+    farScene.add(farMesh);
+    const farLayout = video.I_RenderView(farScene, farCamera);
+    const farPlane = {
+      near: farCamera.near,
+      far: farCamera.far,
+      clear: readGl(0, 0),
+      surface: readGl(
+        farLayout.viewX + farLayout.viewWidth * 0.5,
+        farLayout.webglViewY + farLayout.viewHeight * 0.5,
+      ),
+    };
+    farGeometry.dispose();
+    farMaterial.dispose();
     return {
       frames, borderPixels, sourceIndex, shaderLighting,
       pspriteLighting, pspriteDrawWiring, skyProjection, skyWidthProjection,
+      farPlane,
     };
   });
 
@@ -510,6 +536,13 @@ try {
       !skyWidthProjection.pixels.every((pixel, index) =>
         pixelsEqual(pixel, skyWidthProjection.expected[index]))) {
     failures.push(`variable-width sky mismatch: ${JSON.stringify(skyWidthProjection)}`);
+  }
+  if (result.farPlane.near !== 1 || result.farPlane.far !== 131072 ||
+      result.farPlane.surface[0] < 200 ||
+      result.farPlane.surface[0] <= result.farPlane.surface[1] ||
+      result.farPlane.surface[0] <= result.farPlane.surface[2] ||
+      pixelsEqual(result.farPlane.surface, result.farPlane.clear)) {
+    failures.push(`far-plane clipping mismatch: ${JSON.stringify(result.farPlane)}`);
   }
 
   for (const blocks of [3, 9]) {

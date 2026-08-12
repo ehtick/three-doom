@@ -20,7 +20,10 @@ import {
 import { R_SetPaletteIndex, R_SetPlaypal, R_ShutdownShader } from './r_shader.js';
 import { D_DoomRafLoop } from './d_loop.js';
 import { D_ShouldInterceptDemoInput } from './d_input_logic.js';
-import { R_CalculateCanvasView, R_DoomVerticalFov, R_GetViewSize } from './r_view.js';
+import {
+  R_CalculateCanvasView, R_CAMERA_FAR, R_CAMERA_NEAR, R_DoomVerticalFov,
+  R_GetViewSize,
+} from './r_view.js';
 import { I_Quit, I_RegisterQuitGraphics } from './i_system.js';
 import { I_RunCleanupSteps } from './i_shutdown.js';
 
@@ -144,7 +147,9 @@ export function I_InitGraphics() {
 
   scene = new THREE.Scene();
   const aspect = window.innerWidth / window.innerHeight;
-  camera = new THREE.PerspectiveCamera(R_DoomVerticalFov(aspect), aspect, 1, 16384);
+  camera = new THREE.PerspectiveCamera(
+    R_DoomVerticalFov(aspect), aspect, R_CAMERA_NEAR, R_CAMERA_FAR,
+  );
 
   // 2D overlay
   overlayCanvas = document.getElementById('overlay');

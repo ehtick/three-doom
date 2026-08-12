@@ -8,6 +8,11 @@ export const STATUS_BAR_HEIGHT = 32;
 export const VIEW_AREA_HEIGHT = SCREENHEIGHT - STATUS_BAR_HEIGHT;
 export const MIN_SCREENBLOCKS = 3;
 export const MAX_SCREENBLOCKS = 11;
+export const R_CAMERA_NEAR = 1;
+// Map vertices and sector heights are signed 16-bit map units. The maximum
+// opposite-corner 3D span is sqrt(3) * 65535 (~113,510), so 2^17 covers every
+// representable map without introducing an arbitrary custom-map cutoff.
+export const R_CAMERA_FAR = 131072;
 
 let _screenblocks = 9;
 let _detailLevel = 0;
