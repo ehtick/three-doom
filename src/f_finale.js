@@ -35,6 +35,7 @@ let _stage = 0;
 let _finalecount = 0;
 let _active = false;
 let _done   = null;
+let _completionQueued = false;
 let _finaleText = '';
 let _finaleFlat = '';
 let _commercial = false;
@@ -45,6 +46,7 @@ const F_TEXTWAIT = 250;
 const F_TEXTSPEED = 3;
 
 export function F_StartFinale(onDone) {
+  F_Stop();
   // f_finale.c:96-101 — entering a finale consumes the queued game action and
   // disables the live 3D view/automap until the finale advances.
   set_gameaction(gameaction_t.ga_nothing);
@@ -52,6 +54,7 @@ export function F_StartFinale(onDone) {
   set_viewactive(false);
   set_automapactive(false);
   _active = true;
+  _completionQueued = false;
   _done = onDone || (() => {});
   _finalecount = 0;
   _stage = 0;
@@ -84,15 +87,16 @@ export function F_Responder(ev) {
 }
 
 export function F_Ticker() {
-  if (_active === false) return;
+  if (_active === false || _completionQueued) return;
   if (_commercial) {
     const buttons = players.map((player) => player?.cmd?.buttons ?? 0);
     if (F_ShouldAdvanceCommercial(_finalecount, buttons)) {
       if (gamemap === 30) F_StartCast();
       else {
-        _active = false;
+        // The queued ga_worlddone cannot be handled until the next tic. Keep
+        // this completed frame active so the intervening presentation draws.
+        _completionQueued = true;
         _done(); // G_WorldDone supplied a ga_worlddone callback.
-        return;
       }
     }
   }
@@ -113,17 +117,22 @@ export function F_Ticker() {
 
 const _flatCanvasCache = new Map();
 
+export function F_Stop() {
+  _active = false;
+  _completionQueued = false;
+  _done = null;
+  _cast = null;
+  _castActive = false;
+}
+
 export function F_Shutdown() {
+  F_Stop();
   _flatCanvasCache.clear();
   _stage = 0;
   _finalecount = 0;
-  _active = false;
-  _done = null;
   _finaleText = '';
   _finaleFlat = '';
   _commercial = false;
-  _cast = null;
-  _castActive = false;
 }
 function getFlatCanvas(name) {
   if (_flatCanvasCache.has(name)) return _flatCanvasCache.get(name);

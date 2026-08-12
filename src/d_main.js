@@ -91,6 +91,10 @@ function D_AdvanceDemo() {
 // pagetic / pagename), so the demo runs without the page-timer competing for
 // gamestate transitions. Mode-conditional title/help screens for retail / commercial.
 function D_DoAdvanceDemo() {
+  // D_StartTitle only queues this transition. Release a retained completion
+  // screen here, when the attract loop actually takes ownership of display.
+  if (gamestate === gamestate_t.GS_INTERMISSION) _wiStop?.();
+  else if (gamestate === gamestate_t.GS_FINALE) _fStop?.();
   if (players[consoleplayer] !== undefined && players[consoleplayer] !== null) {
     players[consoleplayer].playerstate = 0 /*PST_LIVE*/;
   }
@@ -383,8 +387,10 @@ let _gWriteDemoCmd = null;
 let _wiDrawer  = null;
 let _wiTicker  = null;
 let _wiResponder = null;
+let _wiStop = null;
 let _fDrawer = null;
 let _fTicker = null;
+let _fStop = null;
 let _isStatusBarVisible = null;
 
 // d_main.c builds the console command before TryRunTics enters G_Ticker.
@@ -430,8 +436,10 @@ function D_ClearLoopReferences() {
   _wiDrawer = null;
   _wiTicker = null;
   _wiResponder = null;
+  _wiStop = null;
   _fDrawer = null;
   _fTicker = null;
+  _fStop = null;
   _isStatusBarVisible = null;
 }
 
@@ -494,9 +502,11 @@ async function D_DoomLoop() {
   _wiDrawer    = wi.WI_Drawer;
   _wiTicker    = wi.WI_Ticker;
   _wiResponder = wi.WI_Responder;
+  _wiStop      = wi.WI_Stop;
   const finale = await import('./f_finale.js');
   _fDrawer = finale.F_Drawer;
   _fTicker = finale.F_Ticker;
+  _fStop = finale.F_Stop;
   // Shutdown may have happened while the dynamic imports above were pending.
   if (D_DoomRafLoop.active(loopToken) !== true) {
     D_ClearLoopReferences();

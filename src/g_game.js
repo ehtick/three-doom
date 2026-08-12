@@ -13,7 +13,7 @@ import { gamestate, set_gamestate, gameaction, set_gameaction, gameepisode, game
          totalkills, totalitems, totalsecret, leveltime,
          secretexit, set_secretexit,
          players, playeringame, consoleplayer, gamemode, gametic } from './doomstat.js';
-import { WI_Start } from './wi_stuff.js';
+import { WI_Start, WI_Stop } from './wi_stuff.js';
 import { M_ScreenShot } from './m_misc.js';
 import { gameaction_t, BT_SPECIAL, BT_SPECIALMASK, BTS_PAUSE } from './d_event.js';
 import { GameMode_t, gamestate_t, skill_t, MAXPLAYERS } from './doomdef.js';
@@ -21,7 +21,7 @@ import { P_Random, M_ClearRandom } from './m_random.js';
 import { states, mobjinfo, S_SARG_RUN1, S_SARG_PAIN2,
          MT_BRUISERSHOT, MT_HEADSHOT, MT_TROOPSHOT } from './info.js';
 import { S_PauseSound, S_ResumeSound } from './s_sound.js';
-import { F_StartFinale } from './f_finale.js';
+import { F_StartFinale, F_Stop } from './f_finale.js';
 import { F_ShouldStartCommercialFinale } from './f_finale_logic.js';
 import { G_SecretExitAvailable } from './g_game_logic.js';
 import {
@@ -258,6 +258,10 @@ export function G_DoReborn(playernum) {
 }
 
 export function G_DoLoadLevel() {
+  // A queued world transition is processed one tic after the non-level ticker
+  // requests it. Retire that still-drawable screen only at the actual exit.
+  WI_Stop();
+  F_Stop();
   // g_game.c:472-473 — restarting while already displaying a level still
   // melts from the old map into the freshly loaded one.
   if (doomstat.wipegamestate === gamestate_t.GS_LEVEL) {
@@ -763,6 +767,7 @@ export function G_WorldDone() {
   if (F_ShouldStartCommercialFinale(gamemode, gamemap, secretexit)) {
     // F_StartFinale consumes ga_worlddone. Non-MAP30 Doom II finales restore it
     // through this callback once the player advances the text screen.
+    WI_Stop();
     F_StartFinale(() => set_gameaction(gameaction_t.ga_worlddone));
   }
 }

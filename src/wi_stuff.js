@@ -157,6 +157,7 @@ let snl_pointeron = false;
 
 let _active = false;       // gates ticker/drawer/responder when not running
 let _onDone = null;        // called at end of NoState (vanilla G_WorldDone)
+let _completionQueued = false; // keep the last frame drawable until state exit
 
 // ----------------------------------------------------------------------------
 // Graphics (decoded patch infos: { canvas, w, h, leftoffset, topoffset } | null)
@@ -375,8 +376,10 @@ function WI_drawTime(x, y, t) {
   }
 }
 
-function WI_End() {
+export function WI_Stop() {
   _active = false;
+  _completionQueued = false;
+  _onDone = null;
   WI_unloadData();
 }
 
@@ -390,7 +393,9 @@ function WI_updateNoState() {
   WI_updateAnimatedBack();
   cnt--;
   if (cnt === 0) {
-    WI_End();
+    // G_Ticker cannot drain this newly queued action until the next tic. Keep
+    // the completed intermission drawable for the presentation in between.
+    _completionQueued = true;
     _onDone(); // vanilla: G_WorldDone()
   }
 }
@@ -672,7 +677,7 @@ export function WI_Responder(_ev) {
 
 // Updates stuff each tick (wi_stuff.c:1502).
 export function WI_Ticker() {
-  if (_active !== true) return;
+  if (_active !== true || _completionQueued) return;
 
   // counter for general background animation
   bcnt++;
@@ -819,9 +824,7 @@ function WI_unloadData() {
 }
 
 export function WI_Shutdown() {
-  _active = false;
-  _onDone = null;
-  WI_unloadData();
+  WI_Stop();
 }
 
 export function WI_Drawer(ctx, dx, dy, dw, dh) {
@@ -859,7 +862,9 @@ function WI_initVariables(wbstartstruct) {
 }
 
 export function WI_Start(wbstartstruct, onDone) {
+  WI_Stop();
   _onDone = (onDone !== null && onDone !== undefined) ? onDone : (() => {});
+  _completionQueued = false;
   WI_initVariables(wbstartstruct);
   WI_loadData();
   if (deathmatch !== 0) WI_initDeathmatchStats();

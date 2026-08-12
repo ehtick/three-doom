@@ -4,8 +4,9 @@ import {
   players, set_gameepisode, set_gamemap, set_gamemode,
 } from '../src/doomstat.js';
 import {
-  F_CastPrint, F_Drawer, F_Shutdown, F_StartFinale, F_Ticker,
+  F_CastActive, F_CastPrint, F_Drawer, F_Shutdown, F_StartFinale, F_Ticker,
 } from '../src/f_finale.js';
+import { G_DoLoadLevel } from '../src/g_game.js';
 import { HU_FONTSTART, HU_GetFont } from '../src/hu_font.js';
 import { HU_Drawer, HU_QueueMessage } from '../src/hu_stuff.js';
 import { V_InitPlaypal } from '../src/v_palette.js';
@@ -185,6 +186,46 @@ async function run() {
   const castPixels = changedPixels(makeCanvas().canvas, actualCast.canvas);
   if (castPixels === 0) throw new Error('F_CastPrint drew no WAD glyph pixels');
 
+  // A non-MAP30 Doom II finale queues ga_worlddone during its ticker. The
+  // scheduler presents once before G_Ticker can drain that action, so the
+  // final frame must remain drawable and frozen until the actual level exit.
+  set_gamemode(GameMode_t.commercial);
+  set_gamemap(6);
+  players[0] = { cmd: { buttons: 1 } };
+  let finaleDone = 0;
+  F_StartFinale(() => finaleDone++);
+  players[0].cmd.buttons = 1;
+  for (let tic = 0; tic < 52; tic++) F_Ticker();
+  assertEquals(finaleDone, 1, 'commercial completion callback');
+  const completedFinale = makeCanvas();
+  F_Drawer(completedFinale.ctx, 0, 0, 320, 200);
+  const completionPixels = changedPixels(makeCanvas().canvas, completedFinale.canvas);
+  if (completionPixels === 0) throw new Error('commercial completion frame was blank');
+  for (let tic = 0; tic < 5; tic++) F_Ticker();
+  assertEquals(finaleDone, 1, 'commercial completion callback remains latched');
+  const frozenFinale = makeCanvas();
+  F_Drawer(frozenFinale.ctx, 0, 0, 320, 200);
+  compareCanvas(frozenFinale.canvas, completedFinale.canvas, 'commercial completion frame');
+
+  // G_DoLoadLevel is the actual state exit and must retire the retained frame.
+  G_DoLoadLevel();
+  const stoppedFinale = makeCanvas();
+  F_Drawer(stoppedFinale.ctx, 0, 0, 320, 200);
+  assertEquals(
+    changedPixels(makeCanvas().canvas, stoppedFinale.canvas),
+    0,
+    'finale stopped at level exit',
+  );
+
+  // MAP30 is not a completion: held buttons still enter/restart the cast.
+  set_gamemap(30);
+  finaleDone = 0;
+  F_StartFinale(() => finaleDone++);
+  players[0].cmd.buttons = 1;
+  for (let tic = 0; tic < 52; tic++) F_Ticker();
+  assertEquals(finaleDone, 0, 'MAP30 does not queue worlddone');
+  assertEquals(F_CastActive(), true, 'MAP30 starts cast');
+
   F_Shutdown();
   return {
     ok: true,
@@ -195,6 +236,8 @@ async function run() {
     castPixels,
     hudPixels,
     hyphenTopOffset: hyphen.topoffset,
+    completionPixels,
+    finaleDone,
   };
 }
 

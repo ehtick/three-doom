@@ -268,6 +268,20 @@ function exerciseInputCompletion(label) {
   assertEquals(done, 0, `${label} show-next press completion`);
   for (let i = 0; i < 10; i++) WI_Ticker();
   assertEquals(done, 1, `${label} callback count`);
+  const completed = makeCanvas();
+  WI_Drawer(completed.ctx, 0, 0, 320, 200);
+  const completedPixels = changedPixels(completed.canvas);
+  if (completedPixels === 0) throw new Error(`${label} completion frame was blank`);
+  for (let i = 0; i < 5; i++) WI_Ticker();
+  assertEquals(done, 1, `${label} callback remains latched`);
+  const frozen = makeCanvas();
+  WI_Drawer(frozen.ctx, 0, 0, 320, 200);
+  compareCanvas(frozen.canvas, completed.canvas, `${label} completion frame remains frozen`);
+  WI_Shutdown();
+  const stopped = makeCanvas();
+  WI_Drawer(stopped.ctx, 0, 0, 320, 200);
+  assertEquals(changedPixels(stopped.canvas), 0, `${label} stops at state exit`);
+  return completedPixels;
 }
 
 async function run() {
@@ -293,7 +307,7 @@ async function run() {
   compareCanvas(actualCoop.canvas, expectedCoop.canvas, 'co-op table');
   const coopPixels = changedPixels(actualCoop.canvas);
   WI_Shutdown();
-  exerciseInputCompletion('co-op');
+  const coopCompletionPixels = exerciseInputCompletion('co-op');
 
   doomstat.set_deathmatch(1);
   resetInput();
@@ -305,7 +319,7 @@ async function run() {
   compareCanvas(actualDeathmatch.canvas, expectedDeathmatch.canvas, 'deathmatch table');
   const deathmatchPixels = changedPixels(actualDeathmatch.canvas);
   WI_Shutdown();
-  exerciseInputCompletion('deathmatch');
+  const deathmatchCompletionPixels = exerciseInputCompletion('deathmatch');
 
   // Production G_DoCompleted integration: the global wminfo must receive a
   // detached four-row frag snapshot before WI_Start consumes it.
@@ -327,7 +341,15 @@ async function run() {
   assertEquals(doomstat.wminfo.plyr[0].frags[1], 3, 'G_DoCompleted detached frags');
   WI_Shutdown();
 
-  return { ok: true, coopPixels, deathmatchPixels, coopDone: 1, deathmatchDone: 1 };
+  return {
+    ok: true,
+    coopPixels,
+    deathmatchPixels,
+    coopCompletionPixels,
+    deathmatchCompletionPixels,
+    coopDone: 1,
+    deathmatchDone: 1,
+  };
 }
 
 run().then((result) => {
