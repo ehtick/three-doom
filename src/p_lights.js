@@ -134,17 +134,20 @@ export function EV_StartLightStrobing(line) {
 export function EV_TurnTagLightsOff(line) {
   for (let i = 0; i < sectors.length; i++) {
     if (sectors[i].tag !== line.tag) continue;
+    const previous = sectors[i].lightlevel;
     let min = sectors[i].lightlevel;
     for (const li of sectors[i].lines) {
       const other = (li.frontsector === sectors[i]) ? li.backsector : li.frontsector;
       if (other !== null && other.lightlevel < min) min = other.lightlevel;
     }
     sectors[i].lightlevel = min;
+    if (min !== previous) applyLight(sectors[i]);
   }
 }
 export function EV_LightTurnOn(line, bright) {
   for (let i = 0; i < sectors.length; i++) {
     if (sectors[i].tag !== line.tag) continue;
+    const previous = sectors[i].lightlevel;
     if (bright === 0) {
       for (const li of sectors[i].lines) {
         const other = (li.frontsector === sectors[i]) ? li.backsector : li.frontsector;
@@ -152,5 +155,6 @@ export function EV_LightTurnOn(line, bright) {
       }
     }
     sectors[i].lightlevel = bright;
+    if (bright !== previous) applyLight(sectors[i]);
   }
 }
