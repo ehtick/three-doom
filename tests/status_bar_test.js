@@ -1,7 +1,7 @@
 import {
   ST_AMMO_CURRENT_X, ST_AMMO_MAX_X, ST_AMMO_Y, ST_ARMORX,
-  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX, ST_FRAGSWIDTH,
-  ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
+  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FaceBackgroundPatch,
+  ST_FRAGSX, ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from '../src/st_status_logic.js';
 
 function assertEquals(actual, expected, message) {
@@ -24,6 +24,13 @@ Deno.test('ammo counters use the reference enum-to-row mapping', () => {
     { currentX: 288, maxX: 314, rows: [173, 179, 191, 185] },
     'ammo widget geometry',
   );
+});
+
+Deno.test('multiplayer face backing follows the live console-player color', () => {
+  assertEquals(ST_FaceBackgroundPatch(false, 0), null, 'single-player backing');
+  for (let player = 0; player < 4; player++) {
+    assertEquals(ST_FaceBackgroundPatch(true, player), `STFB${player}`, `player ${player}`);
+  }
 });
 
 Deno.test('deathmatch replaces arms with the reference frag sum widget', () => {

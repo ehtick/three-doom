@@ -11,6 +11,11 @@ export const ST_AMMO_MAX_X = 314;
 // Ammo enums are clip, shell, cell, missile; the status-bar labels are
 // BULL, SHEL, RCKT, CELL, so cells and rockets deliberately cross rows.
 export const ST_AMMO_Y = Object.freeze([173, 179, 191, 185]);
+const ST_FACE_BACKGROUNDS = Object.freeze(['STFB0', 'STFB1', 'STFB2', 'STFB3']);
+
+export function ST_FaceBackgroundPatch(netgame, consoleplayer) {
+  return netgame ? ST_FACE_BACKGROUNDS[consoleplayer] : null;
+}
 
 export function ST_DeathmatchStatusPlan(deathmatch, frags, consoleplayer) {
   const active = deathmatch !== 0;

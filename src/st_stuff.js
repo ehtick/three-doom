@@ -2,7 +2,7 @@
 // Status bar: STBAR + STARMS + STTNUM* + STYSNUM*/STGNUM* + STKEYS* + STF***
 // face widgets, all rendered via Canvas2D from the WAD's actual patches.
 
-import { players, consoleplayer, deathmatch } from './doomstat.js';
+import { players, consoleplayer, deathmatch, netgame } from './doomstat.js';
 import { weapontype_t, ammotype_t } from './doomdef.js';
 import { V_DecodePatchToCanvas, V_DrawPatchAtCanvas } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
@@ -11,8 +11,8 @@ import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
 import {
   ST_AMMO_CURRENT_X, ST_AMMO_MAX_X, ST_AMMO_Y, ST_ARMORX,
-  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX, ST_FRAGSWIDTH,
-  ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
+  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FaceBackgroundPatch,
+  ST_FRAGSX, ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from './st_status_logic.js';
 
 // Patches are decoded + cached centrally in v_video.js (V_DecodePatchToCanvas).
@@ -338,6 +338,13 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   } else {
     overlayCtx.fillStyle = V_PaletteCSS(6 * 16 + 8);
     overlayCtx.fillRect(dstX, barY, dstW, 32 * sy);
+  }
+  // Multiplayer colors the recessed face area for the console player.
+  // ST_refreshBackground draws this over STBAR before every foreground widget.
+  const faceBackgroundName = ST_FaceBackgroundPatch(netgame, consoleplayer);
+  if (faceBackgroundName !== null) {
+    drawPatchAt(overlayCtx, getPatch(faceBackgroundName),
+      dstX + 143 * sx, dstY + 168 * sy, sx, sy);
   }
   // 2) AMMO — right-aligned at x=44 (3-digit width).
   const ammoIdx = weaponAmmoIndex(p.readyweapon);

@@ -161,6 +161,35 @@ try {
     }
     const ammoRegionMismatch = imageMismatch(ammoStatus, expectedAmmo, 270, 168, 50, 32);
 
+    // STFB0 belongs between STBAR and the face. Rebuild that isolated region
+    // from WAD patches, and also prove it remains absent outside a netgame.
+    doomstat.set_consoleplayer(0);
+    doomstat.set_netgame(false);
+    status.ST_Start();
+    const singleFace = renderStatus();
+    doomstat.set_netgame(true);
+    status.ST_Start();
+    const netFace = renderStatus();
+    const expectedSingleFace = document.createElement('canvas');
+    expectedSingleFace.width = 320;
+    expectedSingleFace.height = 200;
+    const singleFaceTarget = expectedSingleFace.getContext('2d');
+    patch(singleFaceTarget, 'STBAR', 0, 168);
+    patch(singleFaceTarget, 'STFST00', 143, 168);
+    const expectedNetFace = document.createElement('canvas');
+    expectedNetFace.width = 320;
+    expectedNetFace.height = 200;
+    const netFaceTarget = expectedNetFace.getContext('2d');
+    patch(netFaceTarget, 'STBAR', 0, 168);
+    patch(netFaceTarget, 'STFB0', 143, 168);
+    patch(netFaceTarget, 'STFST00', 143, 168);
+    // STARMS occupies the x=143 edge column; the remaining 23 columns are an
+    // isolated face/backing crop.
+    const singleFaceMismatch = imageMismatch(singleFace, expectedSingleFace, 144, 168, 23, 32);
+    const netFaceMismatch = imageMismatch(netFace, expectedNetFace, 144, 168, 23, 32);
+    const faceBackingDifference = imageMismatch(singleFace, netFace, 144, 168, 23, 32);
+    doomstat.set_netgame(false);
+
     return {
       ...percentResult,
       normalMiddleMismatch,
@@ -168,6 +197,9 @@ try {
       combinedVsSkullMismatch,
       cardVsSkullMismatch,
       ammoRegionMismatch,
+      singleFaceMismatch,
+      netFaceMismatch,
+      faceBackingDifference,
     };
   });
 
@@ -188,6 +220,10 @@ try {
   }
   if (result.ammoRegionMismatch !== 0) {
     failures.push(`ammo counters: ${JSON.stringify(result)}`);
+  }
+  if (result.singleFaceMismatch !== 0 || result.netFaceMismatch !== 0
+      || result.faceBackingDifference === 0) {
+    failures.push(`face backing: ${JSON.stringify(result)}`);
   }
   if (errors.length !== 0) failures.push(`page errors: ${errors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
