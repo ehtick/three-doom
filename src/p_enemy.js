@@ -20,6 +20,7 @@ import { EV_DoFloor, lowerFloorToLowest, raiseToTexture } from './p_floor.js';
 import { EV_DoDoor } from './p_doors.js';
 import { P_Random } from './m_random.js';
 import { A_Chase } from './p_enemy_chase.js';
+import { P_PainSkullCoordinate } from './p_enemy_spawn_logic.js';
 
 // External wiring.
 let _S = null;
@@ -745,8 +746,8 @@ function painShootSkull(actor, angle) {
   const an = (angle >>> ANGLETOFINESHIFT) & FINEMASK;
   const skullInfo = mobjinfo[MT_SKULL];
   const prestep = 4 * 65536 + (3 * (actor.info.radius + skullInfo.radius) / 2);
-  const x = (actor.x + ((prestep * finecosine[an]) / 65536)) | 0;
-  const y = (actor.y + ((prestep * finesine[an])   / 65536)) | 0;
+  const x = P_PainSkullCoordinate(actor.x, prestep, finecosine[an]);
+  const y = P_PainSkullCoordinate(actor.y, prestep, finesine[an]);
   const z = actor.z + 8 * 65536;
   // Spawn via global hook (we don't import p_mobj for full P_SpawnMobj).
   if (typeof globalThis.__P_SpawnMobj === 'function') {
