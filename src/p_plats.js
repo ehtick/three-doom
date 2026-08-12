@@ -4,6 +4,7 @@
 import { sectors, numsectors, sides } from './p_setup.js';
 import { T_MovePlane, RESULT_PASTDEST, RESULT_CRUSHED } from './p_floor.js';
 import { P_Random } from './m_random.js';
+import { P_ChangeSectorFloorPic } from './p_spec_logic.js';
 
 const FRACUNIT = 65536;
 const PLATSPEED = FRACUNIT;
@@ -126,7 +127,11 @@ export function EV_DoPlat(line, type, amount) {
     switch (type) {
       case raiseToNearestAndChange:
         plat.speed = PLATSPEED / 2;
-        sec.floorpic = sides[line.sidenum[0]].sector.floorpic;
+        P_ChangeSectorFloorPic(
+          sec,
+          sides[line.sidenum[0]].sector.floorpic,
+          _R_UpdateSectorPlanes,
+        );
         plat.high = P_FindNextHighestFloor(sec, sec.floorheight);
         plat.wait = 0;
         plat.status = PLAT_UP;
@@ -135,7 +140,11 @@ export function EV_DoPlat(line, type, amount) {
         break;
       case raiseAndChange:
         plat.speed = PLATSPEED / 2;
-        sec.floorpic = sides[line.sidenum[0]].sector.floorpic;
+        P_ChangeSectorFloorPic(
+          sec,
+          sides[line.sidenum[0]].sector.floorpic,
+          _R_UpdateSectorPlanes,
+        );
         plat.high = sec.floorheight + amount * FRACUNIT;
         plat.wait = 0;
         plat.status = PLAT_UP;

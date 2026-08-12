@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { subsectors, numsubsectors, nodes, numnodes, vertexes, segs } from './p_setup.js';
 import { NF_SUBSECTOR } from './doomdata.js';
-import { R_GetFlatTexture, R_RegisterFlatMesh } from './r_data.js';
+import { R_GetFlatTexture, R_RebindFlatMesh, R_RegisterFlatMesh } from './r_data.js';
 import { R_MakeDoomMaterial } from './r_shader.js';
 import { skyflatnum } from './doomstat.js';
 import { R_FlatTextureUV } from './r_plane_mapping.js';
@@ -72,13 +72,15 @@ function polyFromSegs(sub) {
   return cleanPoly(pts);
 }
 
-// Fan-triangulate a convex poly into its per-flat bucket; record it per sector.
+// Fan-triangulate a convex poly into its per-sector bucket. A sector must own
+// its material so runtime floorpic changes do not retarget unrelated sectors
+// that happened to start on the same flat.
 function pushConvexPoly(buckets, flatnum, sector, poly, height, reverse, kind) {
   if (flatnum < 0) return;
-  let b = buckets.get(flatnum);
+  let b = buckets.get(sector);
   if (b === undefined) {
-    b = { positions: [], uvs: [], colors: [], indices: [] };
-    buckets.set(flatnum, b);
+    b = { flatnum, sector, kind, positions: [], uvs: [], colors: [], indices: [] };
+    buckets.set(sector, b);
   }
   const startVertex = b.positions.length / 3;
   const l = sector.lightlevel >> 4;
@@ -175,20 +177,22 @@ export function R_BuildPlanes(scene) {
   function makeMesh(buckets, name) {
     const group = new THREE.Group();
     group.name = name;
-    for (const [flatnum, b] of buckets) {
+    for (const b of buckets.values()) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.Float32BufferAttribute(b.positions, 3));
       g.setAttribute('uv',       new THREE.Float32BufferAttribute(b.uvs, 2));
       g.setAttribute('color',    new THREE.Float32BufferAttribute(b.colors, 3));
       g.setIndex(b.indices);
       g.computeVertexNormals();
-      const map = R_GetFlatTexture(flatnum);
+      const map = R_GetFlatTexture(b.flatnum);
       const mat = R_MakeDoomMaterial(map, { plane: true, side: THREE.FrontSide });
       const mesh = new THREE.Mesh(g, mat);
       mesh.frustumCulled = false;
       // Wire each bucket back to its mesh so updates can hit the right geometry.
       b.mesh = mesh;
-      R_RegisterFlatMesh(flatnum, mesh);
+      mesh.userData.doomSector = b.sector;
+      mesh.userData.doomPlaneKind = b.kind;
+      R_RegisterFlatMesh(b.flatnum, mesh);
       group.add(mesh);
     }
     scene.add(group);
@@ -205,6 +209,11 @@ export function R_UpdateSectorPlanes(sector) {
   const arr = _sectorContribs.get(sector);
   if (arr !== undefined) {
     for (const c of arr) {
+      const flatnum = c.kind === 'floor' ? sector.floorpic : sector.ceilingpic;
+      if (c.bucket.flatnum !== flatnum &&
+          R_RebindFlatMesh(c.bucket.mesh, c.bucket.flatnum, flatnum) === true) {
+        c.bucket.flatnum = flatnum;
+      }
       const h = (c.kind === 'floor' ? sector.floorheight : sector.ceilingheight) / 65536;
       const pos = c.bucket.mesh.geometry.attributes.position;
       for (let i = 0; i < c.vertexCount; i++) {

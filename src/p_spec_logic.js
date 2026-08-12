@@ -10,6 +10,17 @@ export function P_StairSpeed(type) {
   return type === build8 ? SCROLL_TEXTURE_STEP / 4 : SCROLL_TEXTURE_STEP * 4;
 }
 
+// Retained Three.js planes need an explicit refresh when gameplay changes the
+// flat number. Vanilla's renderer reads sector.floorpic afresh every frame.
+export function P_ChangeSectorFloorPic(sector, flatnum, updateSectorPlanes) {
+  if (sector.floorpic === flatnum) return false;
+  sector.floorpic = flatnum;
+  if (updateSectorPlanes !== null && updateSectorPlanes !== undefined) {
+    updateSectorPlanes(sector);
+  }
+  return true;
+}
+
 // p_spec.c special 48 advances side 0 by one texture column every tic.
 export function P_AdvanceScrollTextureOffset(textureOffset) {
   return (textureOffset + SCROLL_TEXTURE_STEP) | 0;

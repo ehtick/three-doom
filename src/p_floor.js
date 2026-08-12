@@ -4,7 +4,7 @@
 
 import { sectors, numsectors, sides } from './p_setup.js';
 import { textureheight } from './r_data.js';
-import { P_StairSpeed, build8, turbo16 } from './p_spec_logic.js';
+import { P_ChangeSectorFloorPic, P_StairSpeed, build8, turbo16 } from './p_spec_logic.js';
 
 const FRACUNIT = 65536;
 
@@ -125,12 +125,12 @@ export function T_MoveFloor(thinker) {
     if (f.direction === 1) {
       if (f.type === donutRaise) {
         f.sector.special  = f.newspecial;
-        f.sector.floorpic = f.texture;
+        P_ChangeSectorFloorPic(f.sector, f.texture, _R_UpdateSectorPlanes);
       }
     } else if (f.direction === -1) {
       if (f.type === lowerAndChange) {
         f.sector.special  = f.newspecial;
-        f.sector.floorpic = f.texture;
+        P_ChangeSectorFloorPic(f.sector, f.texture, _R_UpdateSectorPlanes);
       }
     }
     if (_P_RemoveThinker !== null) _P_RemoveThinker(thinker);
@@ -256,7 +256,7 @@ export function EV_DoFloor(line, floortype) {
       case raiseFloor24AndChange:
         f.direction = 1;
         f.floordestheight = sec.floorheight + 24 * FRACUNIT;
-        sec.floorpic = line.frontsector.floorpic;
+        P_ChangeSectorFloorPic(sec, line.frontsector.floorpic, _R_UpdateSectorPlanes);
         sec.special  = line.frontsector.special;
         break;
       case raiseFloor512:
