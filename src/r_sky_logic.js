@@ -6,6 +6,16 @@ import { FRACUNIT } from './m_fixed.js';
 export const SKY_TEXTUREMID = 100 * FRACUNIT;
 export const SKY_COLUMNS_PER_TURN = 1024;
 
+// r_segs.c:530-534 joins two outdoor ceilings even when their heights differ.
+// The retained renderer fills the otherwise-open vertical interval with a
+// screen-space sky seam.
+export function R_NeedsSkyCeilingSeam(front, back, skyFlatNum) {
+  return front !== null && front !== undefined &&
+    back !== null && back !== undefined &&
+    front.ceilingpic === skyFlatNum && back.ceilingpic === skyFlatNum &&
+    front.ceilingheight !== back.ceilingheight;
+}
+
 export function R_SkyTextureColumn(angleRadians, widthMask) {
   let angularColumn = Math.floor(
     angleRadians / (Math.PI * 2) * SKY_COLUMNS_PER_TURN,

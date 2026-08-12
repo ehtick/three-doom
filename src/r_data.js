@@ -330,6 +330,13 @@ export function R_RegisterFlatMesh(flatnum, mesh) {
   s.add(mesh);
 }
 
+export function R_UnregisterFlatMesh(flatnum, mesh) {
+  const s = _meshesByFlatnum.get(flatnum);
+  if (s === undefined) return;
+  s.delete(mesh);
+  if (s.size === 0) _meshesByFlatnum.delete(flatnum);
+}
+
 // Move one retained plane mesh to a different source flat. Keeping the mesh
 // registry in sync is required so animation updates for the old flat cannot
 // overwrite the newly selected material on a later tic.
@@ -338,11 +345,7 @@ export function R_RebindFlatMesh(mesh, oldFlatnum, newFlatnum) {
   const texture = R_GetFlatTexture(newFlatnum);
   if (texture === null) return false;
 
-  const oldSet = _meshesByFlatnum.get(oldFlatnum);
-  if (oldSet !== undefined) {
-    oldSet.delete(mesh);
-    if (oldSet.size === 0) _meshesByFlatnum.delete(oldFlatnum);
-  }
+  R_UnregisterFlatMesh(oldFlatnum, mesh);
   R_RegisterFlatMesh(newFlatnum, mesh);
   mesh.material.uniforms.map.value = texture;
   return true;

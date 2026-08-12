@@ -1,6 +1,6 @@
 import {
-  R_SkyRowStep, R_SkyTextureColumn, R_SkyTextureRow, R_SkyTextureU,
-  R_SkyVisibleRows, SKY_COLUMNS_PER_TURN,
+  R_NeedsSkyCeilingSeam, R_SkyRowStep, R_SkyTextureColumn, R_SkyTextureRow,
+  R_SkyTextureU, R_SkyVisibleRows, SKY_COLUMNS_PER_TURN,
 } from '../src/r_sky_logic.js';
 import { R_CalculateViewSize } from '../src/r_view.js';
 
@@ -22,6 +22,23 @@ const EXPECTED_RANGES = [
   [10, 65536, 16, 183],
   [11, 65536, 0, 199],
 ];
+
+Deno.test('sky ceiling seams reproduce the outdoor height-change hack', () => {
+  const sky = 7;
+  const front = { ceilingpic: sky, ceilingheight: 128 * FRACUNIT };
+  const back = { ceilingpic: sky, ceilingheight: 192 * FRACUNIT };
+  assertEquals(R_NeedsSkyCeilingSeam(front, back, sky), true,
+    'unequal adjacent sky ceilings');
+  back.ceilingheight = front.ceilingheight;
+  assertEquals(R_NeedsSkyCeilingSeam(front, back, sky), false,
+    'equal adjacent sky ceilings collapse the retained seam');
+  back.ceilingheight += FRACUNIT;
+  back.ceilingpic = sky + 1;
+  assertEquals(R_NeedsSkyCeilingSeam(front, back, sky), false,
+    'ordinary ceiling keeps its upper wall boundary');
+  assertEquals(R_NeedsSkyCeilingSeam(front, null, sky), false,
+    'one-sided walls do not create seams');
+});
 
 function referenceWidthMask(width) {
   let power = 1;

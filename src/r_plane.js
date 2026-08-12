@@ -3,18 +3,35 @@
 // partition half-planes (root → leaf) to recover its convex polygon.
 
 import * as THREE from 'three';
-import { subsectors, numsubsectors, nodes, numnodes, vertexes, segs } from './p_setup.js';
-import { NF_SUBSECTOR } from './doomdata.js';
-import { R_GetFlatTexture, R_RebindFlatMesh, R_RegisterFlatMesh } from './r_data.js';
+import {
+  subsectors, numsubsectors, nodes, numnodes, vertexes, segs, lines, numlines,
+} from './p_setup.js';
+import { ML_TWOSIDED, NF_SUBSECTOR } from './doomdata.js';
+import {
+  R_GetFlatTexture, R_RebindFlatMesh, R_RegisterFlatMesh, R_UnregisterFlatMesh,
+} from './r_data.js';
 import { R_MakeDoomMaterial } from './r_shader.js';
 import { skyflatnum } from './doomstat.js';
 import { R_FlatTextureUV } from './r_plane_mapping.js';
+import { R_NeedsSkyCeilingSeam } from './r_sky_logic.js';
 
 // sector → [{bucket, kind, startVertex, vertexCount}] for the by-sector updaters.
 const _sectorContribs = new Map();
+let _skyMaterials = null;
+
+function attachSectorContribution(sector, contribution) {
+  if (sector === null || sector === undefined) return;
+  let arr = _sectorContribs.get(sector);
+  if (arr === undefined) {
+    arr = [];
+    _sectorContribs.set(sector, arr);
+  }
+  arr.push(contribution);
+}
 
 export function R_ShutdownPlanes() {
   _sectorContribs.clear();
+  _skyMaterials = null;
 }
 
 // Sutherland–Hodgman clip by a node's partition half-plane (f<0 = side 0, right).
@@ -95,13 +112,14 @@ function pushConvexPoly(buckets, flatnum, sector, poly, height, reverse, kind) {
     if (reverse) b.indices.push(startVertex, startVertex + i + 1, startVertex + i);
     else         b.indices.push(startVertex, startVertex + i, startVertex + i + 1);
   }
-  let arr = _sectorContribs.get(sector);
-  if (arr === undefined) { arr = []; _sectorContribs.set(sector, arr); }
-  arr.push({ bucket: b, kind, startVertex, vertexCount: poly.length });
+  attachSectorContribution(sector, {
+    bucket: b, kind, startVertex, vertexCount: poly.length,
+  });
 }
 
-export function R_BuildPlanes(scene) {
+export function R_BuildPlanes(scene, skyMaterials = null) {
   _sectorContribs.clear();
+  _skyMaterials = skyMaterials;
   const floorBuckets   = new Map();
   const ceilingBuckets = new Map();
 
@@ -164,14 +182,10 @@ export function R_BuildPlanes(scene) {
     // Keep CCW so the floor fan faces +Y.
     if (polySignedArea(poly) < 0) poly.reverse();
 
-    if (sector.floorpic !== skyflatnum) {
-      pushConvexPoly(floorBuckets, sector.floorpic, sector, poly,
-        sector.floorheight / 65536, false, 'floor');
-    }
-    if (sector.ceilingpic !== skyflatnum) {
-      pushConvexPoly(ceilingBuckets, sector.ceilingpic, sector, poly,
-        sector.ceilingheight / 65536, true, 'ceiling');
-    }
+    pushConvexPoly(floorBuckets, sector.floorpic, sector, poly,
+      sector.floorheight / 65536, false, 'floor');
+    pushConvexPoly(ceilingBuckets, sector.ceilingpic, sector, poly,
+      sector.ceilingheight / 65536, true, 'ceiling');
   }
 
   function makeMesh(buckets, name) {
@@ -184,36 +198,174 @@ export function R_BuildPlanes(scene) {
       g.setAttribute('color',    new THREE.Float32BufferAttribute(b.colors, 3));
       g.setIndex(b.indices);
       g.computeVertexNormals();
-      const map = R_GetFlatTexture(b.flatnum);
-      const mat = R_MakeDoomMaterial(map, { plane: true, side: THREE.FrontSide });
+      const skyMaterial = b.kind === 'floor' ? skyMaterials?.floor : skyMaterials?.ceiling;
+      const isSky = b.flatnum === skyflatnum && skyMaterial !== null &&
+        skyMaterial !== undefined;
+      const map = isSky ? null : R_GetFlatTexture(b.flatnum);
+      const mat = isSky ? skyMaterial :
+        R_MakeDoomMaterial(map, { plane: true, side: THREE.FrontSide });
       const mesh = new THREE.Mesh(g, mat);
       mesh.frustumCulled = false;
       // Wire each bucket back to its mesh so updates can hit the right geometry.
       b.mesh = mesh;
       mesh.userData.doomSector = b.sector;
       mesh.userData.doomPlaneKind = b.kind;
-      R_RegisterFlatMesh(b.flatnum, mesh);
+      mesh.userData.doomSkyPortal = isSky;
+      if (isSky) mesh.renderOrder = -Infinity;
+      else R_RegisterFlatMesh(b.flatnum, mesh);
       group.add(mesh);
     }
     scene.add(group);
     return group;
   }
-  return { floors: makeMesh(floorBuckets, 'floors'), ceilings: makeMesh(ceilingBuckets, 'ceilings') };
+
+  // r_segs.c:530-534 makes adjacent sky ceilings share one effective top
+  // edge. A vertical portal quad fills the interval between their real world
+  // heights; without it, the retained geometry would leave a black slit where
+  // vanilla continues drawing the sky visplane. Equal-height candidates are
+  // kept as collapsed quads so later ceiling movement can open the seam.
+  function makeSkyCeilingSeams() {
+    const skyMaterial = skyMaterials?.ceiling;
+    if (skyMaterial === null || skyMaterial === undefined) return null;
+    const positions = [];
+    const indices = [];
+    const seamBucket = { mesh: null };
+    let activeCount = 0;
+    let candidateCount = 0;
+    for (let i = 0; i < numlines; i++) {
+      const line = lines[i];
+      if ((line.flags & ML_TWOSIDED) === 0 || line.frontsector === null ||
+          line.backsector === null ||
+          line.frontsector.ceilingpic !== skyflatnum ||
+          line.backsector.ceilingpic !== skyflatnum) {
+        continue;
+      }
+      const front = line.frontsector;
+      const back = line.backsector;
+      const active = R_NeedsSkyCeilingSeam(front, back, skyflatnum);
+      const frontHeight = front.ceilingheight / 65536;
+      const backHeight = back.ceilingheight / 65536;
+      const bottom = active ? Math.min(frontHeight, backHeight) : frontHeight;
+      const top = active ? Math.max(frontHeight, backHeight) : frontHeight;
+      const x1 = line.v1.x / 65536;
+      const y1 = line.v1.y / 65536;
+      const x2 = line.v2.x / 65536;
+      const y2 = line.v2.y / 65536;
+      const baseIdx = positions.length / 3;
+      positions.push(
+        x1, bottom, -y1,
+        x2, bottom, -y2,
+        x2, top,    -y2,
+        x1, top,    -y1,
+      );
+      indices.push(baseIdx, baseIdx + 1, baseIdx + 2,
+        baseIdx, baseIdx + 2, baseIdx + 3);
+      const contribution = {
+        bucket: seamBucket, baseIdx, front, back, kind: 'sky-ceiling-seam', active,
+      };
+      attachSectorContribution(front, contribution);
+      if (back !== front) attachSectorContribution(back, contribution);
+      candidateCount++;
+      if (active) activeCount++;
+    }
+    if (candidateCount === 0) return null;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setIndex(indices);
+    const mesh = new THREE.Mesh(geometry, skyMaterial);
+    mesh.frustumCulled = false;
+    mesh.userData.doomSkyPortal = true;
+    mesh.userData.doomSkyPortalKind = 'ceiling-seams';
+    mesh.userData.doomSkySeamCount = activeCount;
+    mesh.userData.doomSkySeamCandidates = candidateCount;
+    mesh.renderOrder = -Infinity;
+    seamBucket.mesh = mesh;
+    const group = new THREE.Group();
+    group.name = 'sky-ceiling-seams';
+    group.add(mesh);
+    scene.add(group);
+    return group;
+  }
+
+  return {
+    floors: makeMesh(floorBuckets, 'floors'),
+    ceilings: makeMesh(ceilingBuckets, 'ceilings'),
+    skySeams: makeSkyCeilingSeams(),
+  };
 }
 
 // R_UpdateSectorPlanes — call after sector.floorheight or .ceilingheight changes.
 // Updates the Y (height) component of every vertex contributed by this sector,
 // and the walls that touch this sector (door/lift/floor animation).
 import { R_UpdateSectorWalls, R_UpdateSectorWallLight } from './r_segs.js';
+
+function updateSkySeam(c) {
+  const mesh = c.bucket.mesh;
+  if (mesh === null) return;
+  const active = R_NeedsSkyCeilingSeam(c.front, c.back, skyflatnum);
+  const frontHeight = c.front.ceilingheight / 65536;
+  const backHeight = c.back.ceilingheight / 65536;
+  const bottom = active ? Math.min(frontHeight, backHeight) : frontHeight;
+  const top = active ? Math.max(frontHeight, backHeight) : frontHeight;
+  const pos = mesh.geometry.attributes.position;
+  pos.setY(c.baseIdx + 0, bottom);
+  pos.setY(c.baseIdx + 1, bottom);
+  pos.setY(c.baseIdx + 2, top);
+  pos.setY(c.baseIdx + 3, top);
+  pos.needsUpdate = true;
+  if (c.active !== active) {
+    mesh.userData.doomSkySeamCount += active ? 1 : -1;
+    c.active = active;
+  }
+}
+
+function rebindPlaneMaterial(c, flatnum) {
+  const bucket = c.bucket;
+  if (bucket.flatnum === flatnum) return true;
+  const mesh = bucket.mesh;
+  const wasSky = mesh.userData.doomSkyPortal === true;
+  const skyMaterial = c.kind === 'floor' ? _skyMaterials?.floor : _skyMaterials?.ceiling;
+  const isSky = flatnum === skyflatnum && skyMaterial !== null &&
+    skyMaterial !== undefined;
+  if (isSky) {
+    if (!wasSky) {
+      R_UnregisterFlatMesh(bucket.flatnum, mesh);
+      const oldMaterial = mesh.material;
+      mesh.material = skyMaterial;
+      oldMaterial.dispose();
+    }
+    mesh.userData.doomSkyPortal = true;
+    mesh.renderOrder = -Infinity;
+    bucket.flatnum = flatnum;
+    return true;
+  }
+  if (wasSky) {
+    const map = R_GetFlatTexture(flatnum);
+    if (map === null) return false;
+    mesh.material = R_MakeDoomMaterial(map, {
+      plane: true, side: THREE.FrontSide,
+    });
+    mesh.userData.doomSkyPortal = false;
+    mesh.renderOrder = 0;
+    R_RegisterFlatMesh(flatnum, mesh);
+    bucket.flatnum = flatnum;
+    return true;
+  }
+  if (R_RebindFlatMesh(mesh, bucket.flatnum, flatnum) !== true) return false;
+  bucket.flatnum = flatnum;
+  return true;
+}
+
 export function R_UpdateSectorPlanes(sector) {
   const arr = _sectorContribs.get(sector);
   if (arr !== undefined) {
     for (const c of arr) {
-      const flatnum = c.kind === 'floor' ? sector.floorpic : sector.ceilingpic;
-      if (c.bucket.flatnum !== flatnum &&
-          R_RebindFlatMesh(c.bucket.mesh, c.bucket.flatnum, flatnum) === true) {
-        c.bucket.flatnum = flatnum;
+      if (c.kind === 'sky-ceiling-seam') {
+        updateSkySeam(c);
+        continue;
       }
+      const flatnum = c.kind === 'floor' ? sector.floorpic : sector.ceilingpic;
+      rebindPlaneMaterial(c, flatnum);
       const h = (c.kind === 'floor' ? sector.floorheight : sector.ceilingheight) / 65536;
       const pos = c.bucket.mesh.geometry.attributes.position;
       for (let i = 0; i < c.vertexCount; i++) {
@@ -233,6 +385,7 @@ export function R_UpdateSectorLight(sector) {
   if (arr !== undefined) {
     const l = sector.lightlevel >> 4;
     for (const c of arr) {
+      if (c.kind === 'sky-ceiling-seam') continue;
       const col = c.bucket.mesh.geometry.attributes.color;
       for (let i = 0; i < c.vertexCount; i++) {
         col.setXYZ(c.startVertex + i, l, l, l);

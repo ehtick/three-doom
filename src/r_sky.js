@@ -10,12 +10,10 @@
 // horizontally) with a fixed vertical anchor at row 100 — it does NOT live
 // in 3D space.
 //
-// We reproduce that with an NDC fullscreen quad whose fragment shader runs
-// the same angle-to-column and screen_y-to-row math as vanilla. The quad has
-// renderOrder = -Infinity + depthTest/depthWrite off, so it's painted first
-// and the world over-draws it. r_plane.js does not emit floor/ceiling
-// geometry for sky-flat sectors, so wherever vanilla would have drawn sky,
-// the quad shows through.
+// We reproduce the sampling with a screen-space shader, but apply it only to
+// the real subsector floor/ceiling polygons and sky-to-sky height seams built
+// by r_plane.js. Their world-space footprints are projected at infinite
+// depth, so closed ceilings and map voids cannot expose a global backdrop.
 
 import * as THREE from 'three';
 import { gamemode, gameepisode, gamemap } from './doomstat.js';
@@ -33,6 +31,7 @@ export let skytexture = -1;
 export let skytexturemid = 0;
 
 let _skyMat = null;
+let _skyFloorMat = null;
 // The cloned sky texture from R_GetWallTexture — held so the next R_BuildSky
 // can dispose it. R_NewMap's _levelRoot teardown skips material.map.dispose()
 // (wall textures are cache-owned), but this clone is owned solely by the sky,
@@ -45,17 +44,21 @@ let _cachedAspect = -1;
 let _hfovHalfTan  = 1;
 
 export function R_ShutdownSky() {
-  const disposedMaterial = _skyMat;
+  const disposedMaterials = [];
+  if (_skyMat !== null) disposedMaterials.push(_skyMat);
+  if (_skyFloorMat !== null) disposedMaterials.push(_skyFloorMat);
   if (_skyMat !== null) _skyMat.dispose();
+  if (_skyFloorMat !== null) _skyFloorMat.dispose();
   if (_skyMap !== null) _skyMap.dispose();
   _skyMat = null;
+  _skyFloorMat = null;
   _skyMap = null;
   _cachedFov = -1;
   _cachedAspect = -1;
   _hfovHalfTan = 1;
   skytexture = -1;
   skytexturemid = 0;
-  return disposedMaterial;
+  return disposedMaterials;
 }
 
 // Mirrors g_game.c:454-468.
@@ -75,15 +78,17 @@ export function R_InitSkyMap() {
   skytexturemid = SKY_TEXTUREMID;
 }
 
-// Vertex shader: pass-through NDC. PlaneGeometry(2,2) already spans
-// [-1,1]×[-1,1] in object space; we ignore camera matrices and emit it
-// straight to clip space at the far plane (z=1) so depth-tested world
-// geometry always wins.
+// Vertex shader: project the portal geometry normally, while retaining its
+// clip-space position so the fragment shader can recover screen coordinates.
+// Passing the full clip vector (rather than pre-divided NDC) preserves linear
+// screen coordinates under perspective-correct varying interpolation.
 const SKY_VERT = /* glsl */ `
-varying vec2 vUv;
+varying vec4 vClipPosition;
 void main() {
-  vUv = uv;
-  gl_Position = vec4(position.xy, 1.0, 1.0);
+  vClipPosition = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  // Keep only the portal's projected footprint. Its depth is forced to the
+  // far plane, because Doom's sky visplane has no world-space height.
+  gl_Position = vec4(vClipPosition.xy, vClipPosition.w, vClipPosition.w);
 }
 `;
 
@@ -103,10 +108,10 @@ uniform float skyTextureMid;    // skytexturemid in texture rows (100)
 uniform float skyRowScale;      // (pspriteiscale>>detailshift) / FRACUNIT
 uniform float skyViewHeight;    // current logical viewheight
 
-varying vec2 vUv;
+varying vec4 vClipPosition;
 
 void main() {
-  vec2 sc = vUv * 2.0 - 1.0;     // centred screen coords in [-1, 1]
+  vec2 sc = vClipPosition.xy / vClipPosition.w;
 
   // Horizontal — same perspective relationship vanilla bakes into
   // xtoviewangle[x] = atan((centerx - x) * iprojection): the per-column
@@ -135,7 +140,7 @@ void main() {
   //   skytexturemid + (y-centery) * (pspriteiscale>>detailshift)
   // Reduced views therefore crop a scaled slice of the sky texture rather
   // than stretching source rows 0..199 into every viewport.
-  float screenY = floor((1.0 - vUv.y) * skyViewHeight);
+  float screenY = floor((1.0 - (sc.y * 0.5 + 0.5)) * skyViewHeight);
   float texRow = floor(
     skyTextureMid + (screenY - floor(skyViewHeight * 0.5)) * skyRowScale
   );
@@ -151,7 +156,7 @@ void main() {
 }
 `;
 
-export function R_BuildSky(levelRoot) {
+export function R_BuildSky() {
   R_InitSkyMap();
   if (skytexture < 0) return null;
   const baseMap = R_GetWallTexture(skytexture);
@@ -168,6 +173,7 @@ export function R_BuildSky(levelRoot) {
   // Dispose the previous level's material + cloned texture so a long session
   // of map changes doesn't leak shader programs / uniform buffers / textures.
   if (_skyMat !== null) _skyMat.dispose();
+  if (_skyFloorMat !== null) _skyFloorMat.dispose();
   if (_skyMap !== null) _skyMap.dispose();
   _skyMap = map;
 
@@ -187,18 +193,22 @@ export function R_BuildSky(levelRoot) {
     },
     vertexShader:   SKY_VERT,
     fragmentShader: SKY_FRAG,
-    depthTest:      false,
+    side:           THREE.DoubleSide,
+    // Sky is an infinite far-depth fill, not a physical plane at a sector
+    // height. Portal meshes render first without writing depth, and later
+    // opaque/masked world geometry overwrites them like Doom's drawing stages.
+    depthTest:      true,
+    depthFunc:      THREE.LessEqualDepth,
     depthWrite:     false,
   });
-
-  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), _skyMat);
-  quad.frustumCulled = false;
-  // -Infinity ensures the sky is the very first thing drawn — three.js renders
-  // opaque objects in ascending renderOrder, falling back to material/state
-  // sort within equal-renderOrder groups.
-  quad.renderOrder = -Infinity;
-  levelRoot.add(quad);
-  return quad;
+  // r_bsp.c only creates a floor visplane below the eye, so a sky floor keeps
+  // its upward-facing winding. Sky ceilings have a deliberate below-eye
+  // exception and their height seams can be approached from either side.
+  _skyFloorMat = _skyMat.clone();
+  _skyFloorMat.uniforms = _skyMat.uniforms;
+  _skyFloorMat.side = THREE.FrontSide;
+  _skyFloorMat.needsUpdate = true;
+  return { floor: _skyFloorMat, ceiling: _skyMat };
 }
 
 // Update per-frame uniforms. Called after R_SetupFrame, so the camera matrix

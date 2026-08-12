@@ -29,11 +29,11 @@ function disposeLevelRoot() {
     R_ClearMeshRegistry();
     return 0;
   }
-  const skyMaterial = R_ShutdownSky();
+  const skyMaterials = R_ShutdownSky();
   if (scene !== null) scene.remove(_levelRoot);
   const disposedGeometries = new Set();
   const disposedMaterials = new Set();
-  if (skyMaterial !== null) disposedMaterials.add(skyMaterial);
+  for (const material of skyMaterials) disposedMaterials.add(material);
   _levelRoot.traverse((o) => {
     if (o.geometry !== undefined && o.geometry !== null &&
         disposedGeometries.has(o.geometry) === false) {
@@ -71,9 +71,9 @@ export function R_NewMap() {
   _levelRoot = new THREE.Group();
   _levelRoot.name = 'level';
   scene.add(_levelRoot);
-  R_BuildSky(_levelRoot);
+  const skyMaterials = R_BuildSky();
   R_BuildWalls(_levelRoot);
-  R_BuildPlanes(_levelRoot);
+  R_BuildPlanes(_levelRoot, skyMaterials);
   R_BuildSpriteBillboards(_levelRoot);
   return _levelRoot;
 }

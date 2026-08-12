@@ -46,7 +46,10 @@ try {
     const psprite = await import('/src/r_psprite.js');
     const { FRACUNIT } = await import('/src/m_fixed.js');
     const sky = await import('/src/r_sky.js');
+    const planeRenderer = await import('/src/r_plane.js');
     const rData = await import('/src/r_data.js');
+    const pSetup = await import('/src/p_setup.js');
+    const doomdata = await import('/src/doomdata.js');
     const info = await import('/src/info.js');
     const overlay = document.getElementById('overlay');
     const overlayCtx = overlay.getContext('2d');
@@ -315,23 +318,87 @@ try {
       b11ReducedDiffs: differingBytes(actualB11, reducedB11),
     };
 
-    // Isolate E1M1's real sky material, replace only its cloned indexed map
-    // with a deterministic per-row pattern, and compare reduced-view pixels
-    // against the corresponding full-view source-row pixels from the same GL
-    // shader. Horizontal columns are uniform so only vertical projection is
-    // under test.
+    // Reuse E1M1's real sky material on a controlled camera-facing portal,
+    // replace only its cloned indexed map with a deterministic per-row
+    // pattern, and compare reduced-view pixels against the corresponding
+    // source rows from the same GL shader. The production level must contain
+    // only bounded portal meshes, never an unmasked fullscreen sky object.
     let skyMesh = null;
+    let skyPortalCount = 0;
+    let unmaskedSkyMeshCount = 0;
+    let wrongSideSkyMeshCount = 0;
     window.scene.traverse((object) => {
-      if (object.material?.uniforms?.skyViewHeight !== undefined) skyMesh = object;
+      if (object.material?.uniforms?.skyViewHeight === undefined) return;
+      if (skyMesh === null) skyMesh = object;
+      if (object.userData.doomSkyPortal === true) skyPortalCount++;
+      else unmaskedSkyMeshCount++;
+      const expectedSide = object.userData.doomPlaneKind === 'floor' ?
+        THREE.FrontSide : THREE.DoubleSide;
+      if (object.material.side !== expectedSide) wrongSideSkyMeshCount++;
     });
     if (skyMesh === null) throw new Error('E1M1 sky shader mesh is missing');
-    const visibility = [];
+    let seamMesh = null;
     window.scene.traverse((object) => {
-      if (object.isMesh === true || object.isSprite === true) {
-        visibility.push([object, object.visible]);
-        object.visible = object === skyMesh;
-      }
+      if (object.userData.doomSkyPortalKind === 'ceiling-seams') seamMesh = object;
     });
+    const seamLines = pSetup.lines.filter((line) =>
+      (line.flags & doomdata.ML_TWOSIDED) !== 0 &&
+      line.frontsector !== null && line.backsector !== null &&
+      line.frontsector.ceilingpic === doomstat.skyflatnum &&
+      line.backsector.ceilingpic === doomstat.skyflatnum
+    );
+    let skySeamUpdate = null;
+    if (seamMesh !== null && seamLines.length > 0) {
+      const line = seamLines[0];
+      const originalBackHeight = line.backsector.ceilingheight;
+      const originalFrontHeight = line.frontsector.ceilingheight;
+      const seamPositions = seamMesh.geometry.attributes.position;
+      const original = [0, 1, 2, 3].map((index) =>
+        seamPositions.getY(index)
+      );
+      const raisedHeight = line.frontsector.ceilingheight + 64 * FRACUNIT;
+      line.backsector.ceilingheight = raisedHeight;
+      planeRenderer.R_UpdateSectorPlanes(line.backsector);
+      const expanded = [0, 1, 2, 3].map((index) =>
+        seamPositions.getY(index)
+      );
+      line.backsector.ceilingheight = line.frontsector.ceilingheight;
+      planeRenderer.R_UpdateSectorPlanes(line.backsector);
+      const collapsed = [0, 1, 2, 3].map((index) =>
+        seamPositions.getY(index)
+      );
+      line.backsector.ceilingheight = originalBackHeight;
+      planeRenderer.R_UpdateSectorPlanes(line.backsector);
+      skySeamUpdate = {
+        candidates: seamMesh.userData.doomSkySeamCandidates,
+        active: seamMesh.userData.doomSkySeamCount,
+        original,
+        expectedOriginal: [
+          Math.min(originalFrontHeight, originalBackHeight) / FRACUNIT,
+          Math.min(originalFrontHeight, originalBackHeight) / FRACUNIT,
+          Math.max(originalFrontHeight, originalBackHeight) / FRACUNIT,
+          Math.max(originalFrontHeight, originalBackHeight) / FRACUNIT,
+        ],
+        expanded,
+        expectedExpanded: [
+          line.frontsector.ceilingheight / FRACUNIT,
+          line.frontsector.ceilingheight / FRACUNIT,
+          raisedHeight / FRACUNIT,
+          raisedHeight / FRACUNIT,
+        ],
+        collapsed,
+        expectedCollapsed: new Array(4).fill(
+          line.frontsector.ceilingheight / FRACUNIT,
+        ),
+      };
+    }
+    const skyTestScene = new THREE.Scene();
+    const skyTestGeometry = new THREE.PlaneGeometry(100, 100);
+    const skyTestMesh = new THREE.Mesh(skyTestGeometry, skyMesh.material);
+    skyTestMesh.position.z = -40;
+    skyTestMesh.renderOrder = -Infinity;
+    skyTestMesh.frustumCulled = false;
+    skyTestScene.add(skyTestMesh);
     const skyMap = skyMesh.material.uniforms.map.value;
     const skyData = skyMap.image.data;
     const originalSkyData = skyData.slice();
@@ -360,7 +427,7 @@ try {
     for (const blocks of [3, 9, 10, 11]) {
       const view = viewModule.R_SetViewSize(blocks);
       sky.R_UpdateSky();
-      const layout = video.I_RenderView(window.scene, window.camera);
+      const layout = video.I_RenderView(skyTestScene, testCamera);
       const referenceStep = Math.trunc(65536 * 320 / view.viewwidth) >> view.detailshift;
       const referenceRow = (y) => Math.floor(
         (100 * 65536 + (y - Math.trunc(view.viewheight / 2)) * referenceStep) / 65536,
@@ -428,7 +495,7 @@ try {
     const horizontalPixels = [];
     for (const column of horizontalColumns) {
       skyUniforms.viewangle.value = column * Math.PI * 2 / 1024;
-      const layout = video.I_RenderView(window.scene, window.camera);
+      const layout = video.I_RenderView(skyTestScene, testCamera);
       horizontalPixels.push(readGl(
         layout.viewX + layout.viewWidth * 0.5,
         layout.webglViewY + layout.viewHeight * 0.5,
@@ -450,7 +517,70 @@ try {
 
     skyData.set(originalSkyData);
     skyMap.needsUpdate = true;
-    for (const [object, visible] of visibility) object.visible = visible;
+    skyTestGeometry.dispose();
+
+    // A bounded portal occupies only the left side. The right side is void,
+    // and an opaque red surface behind the portal must still draw over the
+    // infinite sky. This catches both the old fullscreen leak and an incorrect
+    // finite, depth-writing sky ceiling.
+    const portalTexture = shader.R_MakeIndexedTexture(
+      Uint8Array.of(sourceIndex), Uint8Array.of(255), 1, 1,
+    );
+    const originalPortalUniforms = {
+      map: skyUniforms.map.value,
+      texWidth: skyUniforms.skyTexWidth.value,
+      columnPeriod: skyUniforms.skyColumnPeriod.value,
+      texHeight: skyUniforms.skyTexHeight.value,
+      hfovHalfTan: skyUniforms.hfovHalfTan.value,
+    };
+    skyUniforms.map.value = portalTexture;
+    skyUniforms.skyTexWidth.value = 1;
+    skyUniforms.skyColumnPeriod.value = 1;
+    skyUniforms.skyTexHeight.value = 1;
+    skyUniforms.hfovHalfTan.value = 0;
+    const portalScene = new THREE.Scene();
+    const portalGeometry = new THREE.PlaneGeometry(4, 4);
+    const portalMesh = new THREE.Mesh(portalGeometry, skyMesh.material);
+    portalMesh.position.set(-2.5, 0, -5);
+    portalMesh.renderOrder = -Infinity;
+    portalScene.add(portalMesh);
+    const redGeometry = new THREE.PlaneGeometry(1, 1);
+    const redMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const redMesh = new THREE.Mesh(redGeometry, redMaterial);
+    redMesh.position.set(-4, -1.6, -8);
+    portalScene.add(redMesh);
+    viewModule.R_SetViewSize(9);
+    const portalLayout = video.I_RenderView(portalScene, testCamera);
+    const portalRead = (localX, localY) => readGl(
+      portalLayout.viewX + portalLayout.viewWidth * localX,
+      portalLayout.webglViewY + portalLayout.viewHeight * localY,
+    );
+    const skyPortalMask = {
+      productionPortalCount: skyPortalCount,
+      unmaskedSkyMeshCount,
+      wrongSideSkyMeshCount,
+      seamUpdate: skySeamUpdate,
+      depthTest: skyMesh.material.depthTest,
+      depthFunc: skyMesh.material.depthFunc,
+      expectedDepthFunc: THREE.LessEqualDepth,
+      depthWrite: skyMesh.material.depthWrite,
+      clear: readGl(0, 0),
+      sky: portalRead(0.25, 0.7),
+      expectedSky: rowPixel(sourceIndex, 0),
+      void: portalRead(0.75, 0.7),
+      behind: portalRead(0.25, 0.3),
+      glError: gl.getError(),
+      expectedGlError: gl.NO_ERROR,
+    };
+    skyUniforms.map.value = originalPortalUniforms.map;
+    skyUniforms.skyTexWidth.value = originalPortalUniforms.texWidth;
+    skyUniforms.skyColumnPeriod.value = originalPortalUniforms.columnPeriod;
+    skyUniforms.skyTexHeight.value = originalPortalUniforms.texHeight;
+    skyUniforms.hfovHalfTan.value = originalPortalUniforms.hfovHalfTan;
+    portalTexture.dispose();
+    portalGeometry.dispose();
+    redGeometry.dispose();
+    redMaterial.dispose();
     geometry.dispose();
     wallMaterial.dispose();
     planeMaterial.dispose();
@@ -492,6 +622,7 @@ try {
     return {
       frames, borderPixels, sourceIndex, shaderLighting,
       pspriteLighting, pspriteDrawWiring, skyProjection, skyWidthProjection,
+      skyPortalMask,
       farPlane,
     };
   });
@@ -536,6 +667,28 @@ try {
       !skyWidthProjection.pixels.every((pixel, index) =>
         pixelsEqual(pixel, skyWidthProjection.expected[index]))) {
     failures.push(`variable-width sky mismatch: ${JSON.stringify(skyWidthProjection)}`);
+  }
+  const skyPortalMask = result.skyPortalMask;
+  if (skyPortalMask.productionPortalCount === 0 ||
+      skyPortalMask.unmaskedSkyMeshCount !== 0 ||
+      skyPortalMask.wrongSideSkyMeshCount !== 0 ||
+      skyPortalMask.seamUpdate === null ||
+      skyPortalMask.seamUpdate.candidates !== 16 ||
+      skyPortalMask.seamUpdate.active !== 8 ||
+      !pixelsEqual(skyPortalMask.seamUpdate.original,
+        skyPortalMask.seamUpdate.expectedOriginal) ||
+      !pixelsEqual(skyPortalMask.seamUpdate.expanded,
+        skyPortalMask.seamUpdate.expectedExpanded) ||
+      !pixelsEqual(skyPortalMask.seamUpdate.collapsed,
+        skyPortalMask.seamUpdate.expectedCollapsed) ||
+      skyPortalMask.depthTest !== true ||
+      skyPortalMask.depthFunc !== skyPortalMask.expectedDepthFunc ||
+      skyPortalMask.depthWrite !== false ||
+      !pixelsEqual(skyPortalMask.sky, skyPortalMask.expectedSky) ||
+      !pixelsEqual(skyPortalMask.void, skyPortalMask.clear) ||
+      !pixelsEqual(skyPortalMask.behind, [255, 0, 0, 255]) ||
+      skyPortalMask.glError !== skyPortalMask.expectedGlError) {
+    failures.push(`sky portal masking mismatch: ${JSON.stringify(skyPortalMask)}`);
   }
   if (result.farPlane.near !== 1 || result.farPlane.far !== 131072 ||
       result.farPlane.surface[0] < 200 ||
