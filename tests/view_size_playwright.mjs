@@ -46,6 +46,7 @@ try {
     const psprite = await import('/src/r_psprite.js');
     const { FRACUNIT } = await import('/src/m_fixed.js');
     const sky = await import('/src/r_sky.js');
+    const rData = await import('/src/r_data.js');
     const info = await import('/src/info.js');
     const overlay = document.getElementById('overlay');
     const overlayCtx = overlay.getContext('2d');
@@ -397,6 +398,56 @@ try {
     }
     skyProjection.fullRowZero = skyProjection[11].topPixel;
 
+    const stockSkyUniforms = {
+      textureWidth: skyMesh.material.uniforms.skyTexWidth.value,
+      columnPeriod: skyMesh.material.uniforms.skyColumnPeriod.value,
+      expectedTextureWidth: skyWidth,
+      expectedColumnPeriod: rData.texturewidthmask[sky.skytexture] + 1,
+    };
+    let skyIndexA = 0;
+    let skyIndexB = 1;
+    while (skyIndexB < 256 && samePixel(rowPixel(skyIndexA, 0), rowPixel(skyIndexB, 0))) {
+      skyIndexB++;
+    }
+    if (skyIndexB === 256) throw new Error('PLAYPAL has no distinct sky test colors');
+    const wideIndices = new Uint8Array(512);
+    wideIndices.fill(skyIndexA, 0, 256);
+    wideIndices.fill(skyIndexB, 256);
+    const wideAlphas = new Uint8Array(512);
+    wideAlphas.fill(255);
+    const wideSkyMap = shader.R_MakeIndexedTexture(wideIndices, wideAlphas, 512, 1);
+    const skyUniforms = skyMesh.material.uniforms;
+    const originalHfovHalfTan = skyUniforms.hfovHalfTan.value;
+    const originalViewangle = skyUniforms.viewangle.value;
+    skyUniforms.map.value = wideSkyMap;
+    skyUniforms.skyTexWidth.value = 512;
+    skyUniforms.skyColumnPeriod.value = 512;
+    skyUniforms.skyTexHeight.value = 1;
+    skyUniforms.hfovHalfTan.value = 0;
+    const horizontalColumns = [32.5, 288.5, 544.5];
+    const horizontalPixels = [];
+    for (const column of horizontalColumns) {
+      skyUniforms.viewangle.value = column * Math.PI * 2 / 1024;
+      const layout = video.I_RenderView(window.scene, window.camera);
+      horizontalPixels.push(readGl(
+        layout.viewX + layout.viewWidth * 0.5,
+        layout.webglViewY + layout.viewHeight * 0.5,
+      ));
+    }
+    const skyWidthProjection = {
+      stockSkyUniforms,
+      columns: horizontalColumns,
+      pixels: horizontalPixels,
+      expected: [rowPixel(skyIndexA, 0), rowPixel(skyIndexB, 0), rowPixel(skyIndexA, 0)],
+    };
+    skyUniforms.map.value = skyMap;
+    skyUniforms.skyTexWidth.value = skyWidth;
+    skyUniforms.skyColumnPeriod.value = rData.texturewidthmask[sky.skytexture] + 1;
+    skyUniforms.skyTexHeight.value = skyHeight;
+    skyUniforms.hfovHalfTan.value = originalHfovHalfTan;
+    skyUniforms.viewangle.value = originalViewangle;
+    wideSkyMap.dispose();
+
     skyData.set(originalSkyData);
     skyMap.needsUpdate = true;
     for (const [object, visible] of visibility) object.visible = visible;
@@ -415,11 +466,12 @@ try {
     sky.R_UpdateSky();
     return {
       frames, borderPixels, sourceIndex, shaderLighting,
-      pspriteLighting, pspriteDrawWiring, skyProjection,
+      pspriteLighting, pspriteDrawWiring, skyProjection, skyWidthProjection,
     };
   });
 
   const failures = [];
+  const pixelsEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const expectedLayouts = {
     3: [336, 180, 288, 144, 276],
     9: [48, 36, 864, 432, 132],
@@ -450,6 +502,15 @@ try {
       failures.push(`screenblocks ${blocks} leaked WebGL pixels outside its scissor`);
     }
   }
+  const skyWidthProjection = result.skyWidthProjection;
+  if (skyWidthProjection.stockSkyUniforms.textureWidth !==
+      skyWidthProjection.stockSkyUniforms.expectedTextureWidth ||
+      skyWidthProjection.stockSkyUniforms.columnPeriod !==
+      skyWidthProjection.stockSkyUniforms.expectedColumnPeriod ||
+      !skyWidthProjection.pixels.every((pixel, index) =>
+        pixelsEqual(pixel, skyWidthProjection.expected[index]))) {
+    failures.push(`variable-width sky mismatch: ${JSON.stringify(skyWidthProjection)}`);
+  }
 
   for (const blocks of [3, 9]) {
     const overlay = result.frames[blocks].overlay;
@@ -466,7 +527,6 @@ try {
   if (result.borderPixels.leftBevel[3] !== 255 || result.borderPixels.viewInterior[3] !== 0) {
     failures.push(`BRDR_L/view transparency mismatch: ${JSON.stringify(result.borderPixels)}`);
   }
-  const pixelsEqual = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   if (result.shaderLighting[9].wallRow !== 2 || result.shaderLighting[11].wallRow !== 5) {
     failures.push(`width-specific shader rows mismatch: ${JSON.stringify(result.shaderLighting)}`);
   }

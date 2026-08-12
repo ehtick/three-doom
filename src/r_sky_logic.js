@@ -4,6 +4,20 @@ import { SCREENWIDTH } from './doomdef.js';
 import { FRACUNIT } from './m_fixed.js';
 
 export const SKY_TEXTUREMID = 100 * FRACUNIT;
+export const SKY_COLUMNS_PER_TURN = 1024;
+
+export function R_SkyTextureColumn(angleRadians, widthMask) {
+  let angularColumn = Math.floor(
+    angleRadians / (Math.PI * 2) * SKY_COLUMNS_PER_TURN,
+  );
+  angularColumn = ((angularColumn % SKY_COLUMNS_PER_TURN) +
+    SKY_COLUMNS_PER_TURN) % SKY_COLUMNS_PER_TURN;
+  return angularColumn & widthMask;
+}
+
+export function R_SkyTextureU(angleRadians, textureWidth, widthMask) {
+  return (R_SkyTextureColumn(angleRadians, widthMask) + 0.5) / textureWidth;
+}
 
 export function R_SkyRowStep(viewwidth, detailshift = 0) {
   const pspriteiscale = Math.trunc(FRACUNIT * SCREENWIDTH / viewwidth);

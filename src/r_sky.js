@@ -20,7 +20,9 @@
 import * as THREE from 'three';
 import { gamemode, gameepisode, gamemap } from './doomstat.js';
 import { GameMode_t } from './doomdef.js';
-import { R_CheckTextureNumForName, R_GetWallTexture } from './r_data.js';
+import {
+  R_CheckTextureNumForName, R_GetWallTexture, texturewidthmask,
+} from './r_data.js';
 import { R_GetPaletteTexture, R_GetColormapTexture } from './r_shader.js';
 import { camera } from './i_video.js';
 import { R_GetViewSize } from './r_view.js';
@@ -94,6 +96,8 @@ uniform sampler2D palette;      // 256×1 RGBA
 uniform sampler2D colormap;     // 256×34 R8
 uniform float viewangle;        // radians (Doom convention: 0 = +X, increases CCW)
 uniform float hfovHalfTan;      // tan(horizontal FOV / 2) — = tan(vfov/2)*aspect
+uniform float skyTexWidth;      // physical composite width in pixels
+uniform float skyColumnPeriod;  // texturewidthmask[skytexture] + 1
 uniform float skyTexHeight;     // sky texture height in pixels (typically 128)
 uniform float skyTextureMid;    // skytexturemid in texture rows (100)
 uniform float skyRowScale;      // (pspriteiscale>>detailshift) / FRACUNIT
@@ -113,11 +117,19 @@ void main() {
   // angle than the camera's. So world angle = viewangle - angleOff.
   float angle = viewangle - angleOff;
 
-  // Vanilla: column = (angle >> ANGLETOSKYSHIFT) & 0xFF. ANGLETOSKYSHIFT=22
-  // maps a 32-bit BAM turn (2π rad) to 1024 columns; a 256-col sky texture
-  // therefore wraps 4 times per turn → one full wrap per π/2 rad. wrapS =
-  // RepeatWrapping on the texture handles the modulo.
-  float skyU = angle / 1.5707963267948966;
+  // Vanilla first narrows the unsigned BAM angle to 1024 virtual columns,
+  // then R_GetColumn applies the texture's next-lower-power-of-two mask.
+  // Keep the 1024 wrap distinct: textures wider than 1024 still restart after
+  // one turn, while non-power-of-two textures leave their final columns unused.
+  const float TWO_PI = 6.283185307179586;
+  const float SKY_COLUMNS_PER_TURN = 1024.0;
+  float angularColumn = floor(angle / TWO_PI * SKY_COLUMNS_PER_TURN);
+  angularColumn = mod(
+    mod(angularColumn, SKY_COLUMNS_PER_TURN) + SKY_COLUMNS_PER_TURN,
+    SKY_COLUMNS_PER_TURN
+  );
+  float textureColumn = mod(angularColumn, skyColumnPeriod);
+  float skyU = (textureColumn + 0.5) / skyTexWidth;
 
   // Vertical — R_DrawColumn starts each local view row at:
   //   skytexturemid + (y-centery) * (pspriteiscale>>detailshift)
@@ -166,6 +178,8 @@ export function R_BuildSky(levelRoot) {
       colormap:     { value: R_GetColormapTexture() },
       viewangle:    { value: 0 },
       hfovHalfTan:  { value: 1.0 },
+      skyTexWidth:  { value: map.image.width },
+      skyColumnPeriod: { value: texturewidthmask[skytexture] + 1 },
       skyTexHeight: { value: map.image.height },
       skyTextureMid: { value: skytexturemid / FRACUNIT },
       skyRowScale:  { value: 1.0 },
