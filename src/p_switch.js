@@ -47,6 +47,16 @@ let numswitches = 0;
 const _switchTexSet = new Set();
 export function P_IsSwitchTexture(texnum) { return _switchTexSet.has(texnum); }
 
+// Return the other member of an active off/on pair. The renderer uses this at
+// level setup to warm only counterparts of switch textures the map actually
+// references, avoiding a first-use decode/upload when the switch is pressed.
+export function P_SwitchTexturePair(texnum) {
+  for (let i = 0; i < numswitches * 2; i++) {
+    if (switchlist[i] === texnum) return switchlist[i ^ 1];
+  }
+  return -1;
+}
+
 // Active buttons (countdown timers to flip back).
 const MAXBUTTONS = 16;
 const buttonlist = new Array(MAXBUTTONS);

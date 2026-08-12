@@ -7,19 +7,22 @@
 // index into the global states[] table. The state has a sprite + frame; the
 // sprite name + 'A' + '0' (rotation) gives the lump name (e.g. PISGA0).
 
-import { sprnames, states } from './info.js';
+import { states } from './info.js';
 import { sprites } from './r_things.js';
+import { weaponinfo } from './d_items.js';
 import { W_CacheLumpNum } from './w_wad.js';
 import { colormaps, firstspritelump } from './r_data.js';
-import { patch_t, V_CreatePaletteCanvasInfo } from './v_video.js';
-import { powertype_t, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
+import { patch_t } from './v_video.js';
+import { V_GetActivePalette, V_GetPaletteRevision } from './v_palette.js';
+import { gamemode } from './doomstat.js';
+import { GameMode_t, powertype_t, SCREENWIDTH, SCREENHEIGHT } from './doomdef.js';
 import {
   PSPRITE_SHADOW_ROW,
   R_IsPspriteInvisible,
   R_PspriteColormapRow,
-  R_RemapPspriteIndex,
   SPRITE_SHADOW_FLICKER,
   SPRITE_SHADOW_OPACITY,
+  SPRITE_SHADOW_PALETTE_INDEX,
 } from './r_sprite_logic.js';
 import {
   R_DrawPspritePatch,
@@ -27,10 +30,19 @@ import {
   R_PspritePatchBounds,
 } from './r_psprite_projection.js';
 
-// Cache source indices and one remapped Canvas per COLORMAP row. Each Canvas
-// still resolves those remapped indices through the active PLAYPAL lazily.
+// Cache source indices and one reusable Canvas per patch. Lighting/palette
+// changes repaint that Canvas in place; they do not allocate a remapped array,
+// ImageData, or a new Canvas during R_DrawPlayerSprites.
 const _cache = new Map();
-export function R_ShutdownPlayerSprites() { _cache.clear(); }
+let _sourceBuilds = 0;
+let _canvasBuilds = 0;
+let _canvasRepaints = 0;
+export function R_ShutdownPlayerSprites() {
+  _cache.clear();
+  _sourceBuilds = 0;
+  _canvasBuilds = 0;
+  _canvasRepaints = 0;
+}
 function decodePatch(lumpIdx) {
   let entry = _cache.get(lumpIdx);
   if (entry !== undefined) return entry;
@@ -60,35 +72,144 @@ function decodePatch(lumpIdx) {
     h: p.height,
     leftoffset: p.leftoffset,
     topoffset: p.topoffset,
-    canvases: new Map(),
+    canvasInfo: null,
   };
   _cache.set(lumpIdx, entry);
+  _sourceBuilds++;
   return entry;
 }
 
-// Build the palette-index image selected by R_DrawPSprite. The mapping is
-// cached independently of PLAYPAL; V_CreatePaletteCanvasInfo repaints it when
-// damage/bonus/radiation palette selection changes.
-export function R_CreatePspriteCanvasInfo(source, colormapRow, maps = colormaps) {
-  let canvasInfo = source.canvases.get(colormapRow);
-  if (canvasInfo !== undefined) return canvasInfo;
+function createReusableCanvasInfo(source) {
+  const canvas = document.createElement('canvas');
+  canvas.width = source.w;
+  canvas.height = source.h;
+  const context = canvas.getContext('2d');
+  const image = context.createImageData(source.w, source.h);
+  let selectedRow = 0;
+  let selectedMaps = colormaps;
+  let renderedRow = null;
+  let renderedMaps = null;
+  let renderedRevision = -1;
 
-  const remapped = new Uint8Array(source.indices.length);
-  for (let i = 0; i < remapped.length; i++) {
-    if (source.alphas[i] !== 0) {
-      remapped[i] = R_RemapPspriteIndex(source.indices[i], colormapRow, maps);
+  const info = {
+    w: source.w,
+    h: source.h,
+    leftoffset: source.leftoffset,
+    topoffset: source.topoffset,
+    select(row, maps) {
+      selectedRow = row;
+      selectedMaps = maps;
+    },
+  };
+  Object.defineProperty(info, 'canvas', {
+    enumerable: true,
+    get() {
+      const revision = V_GetPaletteRevision();
+      if (renderedRow !== selectedRow || renderedMaps !== selectedMaps ||
+          renderedRevision !== revision) {
+        const palette = V_GetActivePalette();
+        for (let i = 0; i < source.indices.length; i++) {
+          const paletteIndex = selectedRow === PSPRITE_SHADOW_ROW
+            ? SPRITE_SHADOW_PALETTE_INDEX
+            : selectedMaps[selectedRow * 256 + source.indices[i]];
+          const src = paletteIndex * 4;
+          const dst = i * 4;
+          image.data[dst + 0] = palette[src + 0];
+          image.data[dst + 1] = palette[src + 1];
+          image.data[dst + 2] = palette[src + 2];
+          image.data[dst + 3] = source.alphas[i];
+        }
+        context.putImageData(image, 0, 0);
+        renderedRow = selectedRow;
+        renderedMaps = selectedMaps;
+        renderedRevision = revision;
+        _canvasRepaints++;
+      }
+      return canvas;
+    },
+  });
+  _canvasBuilds++;
+  return info;
+}
+
+// Select the palette-index image used by R_DrawPSprite. The returned object is
+// the source patch's one reusable view; callers consume `.canvas` immediately
+// before another row may be selected for the same patch.
+export function R_CreatePspriteCanvasInfo(source, colormapRow, maps = colormaps) {
+  if (source.canvasInfo === null || source.canvasInfo === undefined) {
+    source.canvasInfo = createReusableCanvasInfo(source);
+  }
+  source.canvasInfo.select(colormapRow, maps);
+  return source.canvasInfo;
+}
+
+function collectStateSprites(root, stateSprites, visited) {
+  let stateIndex = root;
+  while (Number.isInteger(stateIndex) && stateIndex > 0 && !visited.has(stateIndex)) {
+    visited.add(stateIndex);
+    const state = states[stateIndex];
+    if (state === undefined || state === null) break;
+    // P_SetPsprite immediately skips zero-tic states, so their synthetic frame
+    // numbers (notably S_LIGHTDONE) must not be decoded.
+    if (state.tics !== 0) stateSprites.add(state.sprite);
+    stateIndex = state.nextstate;
+  }
+}
+
+// Decode every stock weapon/flash family once. Cheats can grant weapons that
+// were not owned at level start, so coverage is based on weaponinfo rather
+// than the current inventory. Current restored psprite states are included for
+// completeness before the first post-load frame.
+export function R_PrecachePlayerSprites(players = []) {
+  if (sprites === null) return R_GetPspriteCacheStats();
+  const stateSprites = new Set();
+  const visited = new Set();
+  for (let weapon = 0; weapon < weaponinfo.length; weapon++) {
+    if (gamemode === GameMode_t.shareware && (weapon === 5 || weapon === 6 || weapon === 8)) continue;
+    if (gamemode !== GameMode_t.commercial && weapon === 8) continue;
+    const info = weaponinfo[weapon];
+    for (const root of [
+      info.upstate, info.downstate, info.readystate, info.atkstate, info.flashstate,
+    ]) collectStateSprites(root, stateSprites, visited);
+    // Chaingun and plasma choose one of two sibling flash roots directly.
+    if ((weapon === 3 || weapon === 5) && info.flashstate > 0) {
+      collectStateSprites(info.flashstate + 1, stateSprites, visited);
     }
   }
-  canvasInfo = V_CreatePaletteCanvasInfo(
-    remapped,
-    source.alphas,
-    source.w,
-    source.h,
-    source.leftoffset,
-    source.topoffset,
-  );
-  source.canvases.set(colormapRow, canvasInfo);
-  return canvasInfo;
+  for (const player of players ?? []) {
+    for (const psprite of player?.psprites ?? []) {
+      collectStateSprites(psprite.state, stateSprites, visited);
+    }
+  }
+
+  for (const spriteIndex of stateSprites) {
+    const definition = sprites[spriteIndex];
+    if (definition === undefined || definition === null || definition.numframes === 0 ||
+        !Array.isArray(definition.spriteframes)) continue;
+    for (const frame of definition.spriteframes) {
+      const lump = frame?.lump?.[0];
+      if (!Number.isInteger(lump) || lump < 0) continue;
+      const source = decodePatch(lump);
+      // Allocate the one Canvas/ImageData and paint a valid initial row now.
+      const canvasInfo = R_CreatePspriteCanvasInfo(source, 0);
+      void canvasInfo.canvas;
+    }
+  }
+  return R_GetPspriteCacheStats();
+}
+
+export function R_GetPspriteCacheStats() {
+  let canvasEntries = 0;
+  for (const source of _cache.values()) {
+    if (source.canvasInfo !== null) canvasEntries++;
+  }
+  return {
+    sourceEntries: _cache.size,
+    canvasEntries,
+    sourceBuilds: _sourceBuilds,
+    canvasBuilds: _canvasBuilds,
+    repaints: _canvasRepaints,
+  };
 }
 
 // Draw the player's psprites onto the overlay canvas. Called from D_Display

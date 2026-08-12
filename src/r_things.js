@@ -113,6 +113,30 @@ export function R_InitSprites() {
 // ---------- Sprite billboards (3D port) ----------
 
 const _spriteTextureCache = new Map(); // lump index -> { tex, w, h, offsetX, offsetY }
+const _prewarmedSpriteDefinitions = new Set();
+let _spriteBaseBuilds = 0;
+let _spriteFlipBuilds = 0;
+let _uploadSpriteTexture = null;
+
+// R_NewMap installs WebGLRenderer.initTexture here. Keeping the uploader
+// injected avoids an r_things -> i_video cycle, and lets dynamically spawned
+// actors warm their textures before the next display pass.
+export function R_SetSpriteTextureUploader(uploadTexture) {
+  _uploadSpriteTexture = typeof uploadTexture === 'function' ? uploadTexture : null;
+  // A state hook may have decoded a sprite before the renderer was available.
+  // Installing the uploader later must still move every retained texture to
+  // the GPU before display.
+  if (_uploadSpriteTexture !== null) {
+    for (const entry of _spriteTextureCache.values()) {
+      _uploadSpriteTexture(entry.tex);
+      if (entry.texFlipped !== null) _uploadSpriteTexture(entry.texFlipped);
+    }
+  }
+}
+
+function uploadSpriteTexture(texture) {
+  if (_uploadSpriteTexture !== null) _uploadSpriteTexture(texture);
+}
 
 // Wrap palette indices + binary alpha in the same RG8 representation as Doom
 // world textures. Sprite rows are stored top-first, so flip on upload.
@@ -158,6 +182,8 @@ function buildSpriteTexture(spriteLumpIndex) {
   const tex = makeSpriteDataTexture(indices, alphas, w, h);
   const info = { tex, texFlipped: null, w, h, offsetX: p.leftoffset, offsetY: p.topoffset };
   _spriteTextureCache.set(spriteLumpIndex, info);
+  _spriteBaseBuilds++;
+  uploadSpriteTexture(tex);
   return info;
 }
 
@@ -180,7 +206,95 @@ function getFlippedTexture(info) {
   }
   const tex = makeSpriteDataTexture(indices, alphas, w, h);
   info.texFlipped = tex;
+  _spriteFlipBuilds++;
+  uploadSpriteTexture(tex);
   return tex;
+}
+
+function precacheSpriteDefinition(spriteIndex) {
+  if (_prewarmedSpriteDefinitions.has(spriteIndex)) return;
+  const definition = sprites?.[spriteIndex];
+  if (definition === undefined || definition === null || definition.numframes === 0 ||
+      !Array.isArray(definition.spriteframes)) {
+    _prewarmedSpriteDefinitions.add(spriteIndex);
+    return;
+  }
+  for (const frame of definition.spriteframes) {
+    if (frame === undefined || frame === null) continue;
+    const rotations = frame.rotate === true ? 8 : 1;
+    for (let rotation = 0; rotation < rotations; rotation++) {
+      const lump = frame.lump[rotation];
+      if (!Number.isInteger(lump) || lump < 0) continue;
+      const info = buildSpriteTexture(lump);
+      if (frame.flip[rotation] === 1) getFlippedTexture(info);
+    }
+  }
+  _prewarmedSpriteDefinitions.add(spriteIndex);
+}
+
+// Warm the complete sprite definition selected by one state. This is also
+// injected into P_SetMobjState, covering exceptional runtime assignments such
+// as a crusher replacing an arbitrary corpse with S_GIBS.
+export function R_PrecacheMobjState(stateIndex) {
+  if (!Number.isInteger(stateIndex) || stateIndex <= 0) return;
+  const state = states[stateIndex];
+  if (state === undefined || state === null || state.tics === 0) return;
+  precacheSpriteDefinition(state.sprite);
+}
+
+const MOBJ_STATE_ROOTS = [
+  'spawnstate', 'seestate', 'painstate', 'meleestate', 'missilestate',
+  'deathstate', 'xdeathstate', 'raisestate',
+];
+
+export function R_PrecacheMobjSprite(mobj) {
+  if (mobj === null || mobj === undefined) return;
+  // Preserve native's current mobj->sprite marking even for a restored object
+  // whose raw sprite/state fields disagree, then cover every normal state
+  // family reachable for this actor type.
+  if (Number.isInteger(mobj.sprite)) precacheSpriteDefinition(mobj.sprite);
+  const roots = [mobj.state];
+  if (mobj.info !== null && mobj.info !== undefined) {
+    for (const key of MOBJ_STATE_ROOTS) roots.push(mobj.info[key]);
+  }
+  const visited = new Set();
+  for (const root of roots) {
+    let stateIndex = root;
+    while (Number.isInteger(stateIndex) && stateIndex > 0 && !visited.has(stateIndex)) {
+      visited.add(stateIndex);
+      const state = states[stateIndex];
+      if (state === undefined || state === null) break;
+      if (state.tics !== 0) precacheSpriteDefinition(state.sprite);
+      stateIndex = state.nextstate;
+    }
+  }
+}
+
+// Authoritative level warmup. R_NewMap calls this only after optional save
+// restoration has installed the final thinker population.
+export function R_PrecacheLevelSprites() {
+  const cap = typeof globalThis === 'undefined' ? null : globalThis.__doom_thinkercap;
+  if (cap === null || cap === undefined || cap.next === null) return R_GetSpriteCacheStats();
+  for (let current = cap.next; current !== cap; current = current.next) {
+    const mobj = current.__mobj;
+    if (mobj !== undefined && mobj !== null && R_MobjHasWorldSprite(mobj.flags)) {
+      R_PrecacheMobjSprite(mobj);
+    }
+  }
+  return R_GetSpriteCacheStats();
+}
+
+export function R_GetSpriteCacheStats() {
+  let flippedEntries = 0;
+  for (const entry of _spriteTextureCache.values()) {
+    if (entry.texFlipped !== null) flippedEntries++;
+  }
+  return {
+    baseEntries: _spriteTextureCache.size,
+    flippedEntries,
+    baseBuilds: _spriteBaseBuilds,
+    flipBuilds: _spriteFlipBuilds,
+  };
 }
 
 // Dispose every cached sprite texture and drop the cache. Called from
@@ -192,6 +306,9 @@ export function R_ClearSpriteCache() {
     if (entry.texFlipped !== null) entry.texFlipped.dispose();
   }
   _spriteTextureCache.clear();
+  _prewarmedSpriteDefinitions.clear();
+  _spriteBaseBuilds = 0;
+  _spriteFlipBuilds = 0;
 }
 
 export function R_ShutdownThings() {
@@ -200,6 +317,7 @@ export function R_ShutdownThings() {
   viewx = 0;
   viewy = 0;
   R_ClearSpriteCache();
+  _uploadSpriteTexture = null;
 }
 
 // Track live billboards so we can update them per-frame from mobj state.
@@ -241,6 +359,10 @@ export function R_RegisterMobjSprite(mobj) {
   // mobjs are thinkers but are intentionally absent from that list.
   if (mobj === null || !R_MobjHasWorldSprite(mobj.flags)) return;
   if (_thingsGroup === null) return; // level not yet rendered (boot transient)
+  // Mid-game actors (projectiles, puffs, drops, fog) were absent from the
+  // level-start thinker walk. Decode and upload their complete state family at
+  // spawn time so R_UpdateSprites remains a cache-only display operation.
+  R_PrecacheMobjSprite(mobj);
   // Bare sprite — texture/scale/position set on first R_UpdateSprites pass.
   // We use a placeholder material so the sprite is valid even before the
   // first update; R_UpdateSprites supplies its indexed map immediately.

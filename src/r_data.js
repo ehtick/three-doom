@@ -9,6 +9,9 @@ import { I_Error } from './i_system.js';
 import { FRACBITS } from './m_fixed.js';
 import { patch_t } from './v_video.js';
 import { R_MakeIndexedTexture, R_ShaderInit } from './r_shader.js';
+import { sectors, sides } from './p_setup.js';
+import { gamemode, gameepisode, gamemap } from './doomstat.js';
+import { GameMode_t } from './doomdef.js';
 
 // ---------- Lump ranges ----------
 export let firstflat = 0, lastflat = 0, numflats = 0;
@@ -37,6 +40,8 @@ export let playpal_rgba = null;
 // ---------- Three.js cached resources (built lazily) ----------
 const _flatTextureCache    = new Map(); // flatnum -> THREE.DataTexture
 const _textureTextureCache = new Map(); // texturenum -> THREE.DataTexture
+let _flatTextureBuilds = 0;
+let _wallTextureBuilds = 0;
 
 // ---------- R_FlatNumForName ----------
 export function R_FlatNumForName(name) {
@@ -254,6 +259,7 @@ export function R_GetFlatTexture(flatnum) {
   if (tex === undefined) {
     tex = makeIndexedTexture(buildFlatIndexed(flatnum));
     _flatTextureCache.set(flatnum, tex);
+    _flatTextureBuilds++;
   }
   return tex;
 }
@@ -267,14 +273,102 @@ export function R_GetWallTexture(texnum) {
   if (tex === undefined) {
     tex = makeIndexedTexture(buildTextureIndexed(texnum));
     _textureTextureCache.set(texnum, tex);
+    _wallTextureBuilds++;
   }
   return tex;
 }
 
 // ---------- R_PrecacheLevel ----------
-// In the 3D port this is a no-op — we lazily build Three.js textures on demand
-// when geometry is constructed.
-export function R_PrecacheLevel() {}
+// r_data.c:743-844 marks every flat and wall texture referenced by the map,
+// plus the episode-dependent sky. The browser port has more work than the C
+// lump cache: decode each indexed image now and optionally upload its
+// DataTexture so the first rendered frame performs no cache construction.
+function levelSkyTexture() {
+  let name;
+  if (gamemode === GameMode_t.commercial) {
+    if (gamemap < 12) name = 'SKY1';
+    else if (gamemap < 21) name = 'SKY2';
+    else name = 'SKY3';
+  } else if (gameepisode === 1) name = 'SKY1';
+  else if (gameepisode === 2) name = 'SKY2';
+  else if (gameepisode === 3) name = 'SKY3';
+  else name = 'SKY4';
+  return R_CheckTextureNumForName(name);
+}
+
+export function R_PrecacheLevel({ uploadTexture = null, switchTexturePair = null } = {}) {
+  if (flattranslation === null || texturetranslation === null) {
+    return { flats: 0, textures: 0 };
+  }
+
+  const flatnums = new Set();
+  for (const sector of sectors ?? []) {
+    flatnums.add(sector.floorpic);
+    flatnums.add(sector.ceilingpic);
+  }
+
+  const texturenums = new Set();
+  for (const side of sides ?? []) {
+    texturenums.add(side.toptexture);
+    texturenums.add(side.midtexture);
+    texturenums.add(side.bottomtexture);
+  }
+  const sky = levelSkyTexture();
+  if (sky >= 0) texturenums.add(sky);
+
+  // Switches replace a referenced sidedef texture with its counterpart at
+  // runtime. Resolve through p_switch's active, game-mode-filtered table so
+  // pressing one cannot defer a DataTexture upload to the following display.
+  if (typeof switchTexturePair === 'function') {
+    for (const texnum of [...texturenums]) {
+      const pair = switchTexturePair(texnum);
+      if (Number.isInteger(pair) && pair >= 0) texturenums.add(pair);
+    }
+  }
+
+  // A map only names the frame that is visible at tic zero, but
+  // R_AnimateTextures can select every member of that frame's animation.
+  // Expand only animations actually referenced by this level so later tics
+  // remain cache lookups without decoding/uploading unrelated WAD textures.
+  for (const animation of _animatedTextures) {
+    const referenced = animation.isTexture ? texturenums : flatnums;
+    let used = false;
+    for (let pic = animation.start; pic <= animation.end; pic++) {
+      if (referenced.has(pic)) {
+        used = true;
+        break;
+      }
+    }
+    if (!used) continue;
+    for (let pic = animation.start; pic <= animation.end; pic++) referenced.add(pic);
+  }
+
+  let flatCount = 0;
+  for (const flatnum of flatnums) {
+    const texture = R_GetFlatTexture(flatnum);
+    if (texture === null) continue;
+    flatCount++;
+    if (typeof uploadTexture === 'function') uploadTexture(texture);
+  }
+
+  let textureCount = 0;
+  for (const texnum of texturenums) {
+    const texture = R_GetWallTexture(texnum);
+    if (texture === null) continue;
+    textureCount++;
+    if (typeof uploadTexture === 'function') uploadTexture(texture);
+  }
+  return { flats: flatCount, textures: textureCount };
+}
+
+export function R_GetDataCacheStats() {
+  return {
+    flatEntries: _flatTextureCache.size,
+    wallEntries: _textureTextureCache.size,
+    flatBuilds: _flatTextureBuilds,
+    wallBuilds: _wallTextureBuilds,
+  };
+}
 
 // ---------- Animated textures (P_InitPicAnims hook) ----------
 // p_spec.c defines a list of (start, end, speed, isTexture) — each animation
@@ -306,6 +400,8 @@ export function R_ShutdownData() {
   for (const texture of _textureTextureCache.values()) texture.dispose();
   _flatTextureCache.clear();
   _textureTextureCache.clear();
+  _flatTextureBuilds = 0;
+  _wallTextureBuilds = 0;
   R_ClearMeshRegistry();
   _animatedTextures.length = 0;
 

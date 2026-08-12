@@ -4,13 +4,18 @@
 // to match the player and asks Three.js to render.
 
 import * as THREE from 'three';
-import { camera, scene, I_RenderView } from './i_video.js';
+import { camera, renderer, scene, I_RenderView } from './i_video.js';
 import { players, consoleplayer, viewangleoffset } from './doomstat.js';
 import { ANG90 } from './tables.js';
 import { R_BuildWalls, R_ShutdownWalls } from './r_segs.js';
 import { R_BuildPlanes, R_ShutdownPlanes } from './r_plane.js';
-import { R_BuildSpriteBillboards, R_ShutdownThings, set_view as set_thing_view } from './r_things.js';
-import { R_ClearMeshRegistry } from './r_data.js';
+import {
+  R_BuildSpriteBillboards, R_PrecacheLevelSprites, R_SetSpriteTextureUploader,
+  R_ShutdownThings, R_UpdateSprites, set_view as set_thing_view,
+} from './r_things.js';
+import { R_ClearMeshRegistry, R_PrecacheLevel } from './r_data.js';
+import { R_PrecachePlayerSprites } from './r_psprite.js';
+import { P_SwitchTexturePair } from './p_switch.js';
 import { R_BuildSky, R_UpdateSky, R_ShutdownSky } from './r_sky.js';
 import { R_PointInSubsector } from './r_bsp.js';
 import { R_SetViewLighting } from './r_shader.js';
@@ -68,6 +73,18 @@ export function R_NewMap() {
   if (_levelRoot !== null) {
     disposeLevelRoot();
   }
+  const uploadTexture = renderer !== null && typeof renderer.initTexture === 'function'
+    ? (texture) => renderer.initTexture(texture)
+    : null;
+  R_SetSpriteTextureUploader(uploadTexture);
+  // This is the first point at which an optional save restore and corrupt-map
+  // fallback have both completed. Warm the final world, thinker population,
+  // and every weapon family before constructing anything the display loop can
+  // visit. R_PrecacheLevel is idempotent after P_SetupLevel's native call.
+  R_PrecacheLevel({ uploadTexture, switchTexturePair: P_SwitchTexturePair });
+  R_PrecacheLevelSprites();
+  R_PrecachePlayerSprites(players);
+
   _levelRoot = new THREE.Group();
   _levelRoot.name = 'level';
   scene.add(_levelRoot);
@@ -75,6 +92,21 @@ export function R_NewMap() {
   R_BuildWalls(_levelRoot);
   R_BuildPlanes(_levelRoot, skyMaterials);
   R_BuildSpriteBillboards(_levelRoot);
+  // Bind each current billboard to an already-decoded texture, then upload
+  // level-owned clones (notably the sky) and compile shader programs. Later
+  // animation/rotation swaps therefore remain cache-only operations.
+  R_UpdateSprites();
+  if (uploadTexture !== null) {
+    _levelRoot.traverse((object) => {
+      if (object.material === undefined || object.material === null) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        const map = material.uniforms?.map?.value ?? material.map ?? null;
+        if (map !== null && map !== undefined && map.isTexture === true) uploadTexture(map);
+      }
+    });
+  }
+  if (renderer !== null && typeof renderer.compile === 'function') renderer.compile(scene, camera);
   return _levelRoot;
 }
 

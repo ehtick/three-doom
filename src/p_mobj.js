@@ -92,6 +92,7 @@ import { actionRegistry } from './info.js';
 export let P_RemoveMobj_external = null; // wired by SetExternals to avoid cycle
 let R_RemoveMobjSprite_external = null;
 let R_RegisterMobjSprite_external = null;
+let R_PrecacheMobjState_external = null;
 export function P_SetExternals(refs) {
   if (refs.P_RemoveMobj != null) P_RemoveMobj_external = refs.P_RemoveMobj;
   if (refs.P_TryMove != null)    P_TryMove_external    = refs.P_TryMove;
@@ -100,6 +101,7 @@ export function P_SetExternals(refs) {
   if (refs.S_StopSound != null)  S_StopSound_external  = refs.S_StopSound;
   if (refs.R_RemoveMobjSprite != null) R_RemoveMobjSprite_external = refs.R_RemoveMobjSprite;
   if (refs.R_RegisterMobjSprite != null) R_RegisterMobjSprite_external = refs.R_RegisterMobjSprite;
+  if (refs.R_PrecacheMobjState != null) R_PrecacheMobjState_external = refs.R_PrecacheMobjState;
 }
 let P_TryMove_external    = null;
 let P_SlideMove_external  = null;
@@ -115,6 +117,12 @@ export function P_SetMobjState(mobj, state) {
       return false;
     }
     const st = states[state];
+    // A state may be assigned outside the actor's ordinary mobjinfo roots
+    // (notably crusher gibs). Warm its complete sprite definition before the
+    // next display pass; zero-tic states are never themselves visible.
+    if (st.tics !== 0 && R_PrecacheMobjState_external !== null) {
+      R_PrecacheMobjState_external(state);
+    }
     mobj.state  = state;
     mobj.tics   = st.tics;
     mobj.sprite = st.sprite;

@@ -719,6 +719,7 @@ export async function D_DoomMain() {
     S_StopSound:  S.S_StopSound,
     R_RemoveMobjSprite:   RT.R_RemoveMobjSprite,
     R_RegisterMobjSprite: RT.R_RegisterMobjSprite,
+    R_PrecacheMobjState:  RT.R_PrecacheMobjState,
   });
   // Wire p_pspr → sound + d_items + p_map + p_enemy (for noise alerts).
   const pp = await import('./p_pspr.js');
