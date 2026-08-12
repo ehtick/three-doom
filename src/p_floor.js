@@ -4,6 +4,7 @@
 
 import { sectors, numsectors, sides } from './p_setup.js';
 import { textureheight } from './r_data.js';
+import { P_StairSpeed, build8, turbo16 } from './p_spec_logic.js';
 
 const FRACUNIT = 65536;
 
@@ -188,7 +189,7 @@ export const lowerFloor = 0, lowerFloorToLowest = 1, turboLower = 2, raiseFloor 
   raiseFloorTurbo = 10, donutRaise = 11, raiseFloor512 = 12;
 
 // Stair builder type (mirrors stair_e in p_spec.h:577 — build8=0, turbo16=1).
-export const build8 = 0, turbo16 = 1;
+export { build8, turbo16 };
 
 export function EV_DoFloor(line, floortype) {
   let rtn = 0;
@@ -333,7 +334,7 @@ export function EV_RaiseDonut(s1, s2, s3) {
 export function EV_BuildStairs(line, type) {
   // p_floor.c:493 — build8 = 8-unit slow step; turbo16 = 16-unit fast step.
   const stepHeight = (type === build8 ? 8 : 16) * FRACUNIT;
-  const speed      = (type === build8 ? FRACUNIT / 4 : FRACUNIT);
+  const speed = P_StairSpeed(type);
   let rtn = 0;
   for (let i = 0; i < numsectors; i++) {
     const seed = sectors[i];
