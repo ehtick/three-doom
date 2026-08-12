@@ -3,11 +3,31 @@
 // but the practical wrapper here registers explicit code -> action handlers so
 // it slots cleanly into the JS keyboard event path.
 
-import { players, consoleplayer, gamemode, netgame } from './doomstat.js';
-import { GameMode_t } from './doomdef.js';
+import { players, consoleplayer, gamemode, gameskill, netgame } from './doomstat.js';
+import { GameMode_t, powertype_t } from './doomdef.js';
 import { S_ChangeMusic } from './s_sound.js';
 import { mus_runnin, mus_e1m1 } from './sounds.js';
-import { STSTR_MUS, STSTR_NOMUS } from './d_englsh.js';
+import {
+  STSTR_BEHOLD,
+  STSTR_BEHOLDX,
+  STSTR_CHOPPERS,
+  STSTR_CLEV,
+  STSTR_MUS,
+  STSTR_NOMUS,
+} from './d_englsh.js';
+import {
+  M_ApplyChoppersCheat,
+  M_ParseClev,
+  M_PlayerPositionMessage,
+  M_TogglePowerCheat,
+} from './m_cheat_logic.js';
+
+let _P_GivePower = null;
+let _G_DeferedInitNew = null;
+export function M_CheatSetExternals(refs) {
+  if (refs.P_GivePower != null) _P_GivePower = refs.P_GivePower;
+  if (refs.G_DeferedInitNew != null) _G_DeferedInitNew = refs.G_DeferedInitNew;
+}
 
 // C macro: bit i of input -> bit j of output. From m_cheat.h:
 //   bit 0 -> 7, bit 1 -> 6, bit 2 -> 2, bit 3 -> 4,
@@ -116,18 +136,62 @@ const cheats = [
   } },
 ];
 
+const powerCheats = [
+  { seq: makeCheatSeq('idbeholdv'), power: powertype_t.pw_invulnerability },
+  { seq: makeCheatSeq('idbeholds'), power: powertype_t.pw_strength },
+  { seq: makeCheatSeq('idbeholdi'), power: powertype_t.pw_invisibility },
+  { seq: makeCheatSeq('idbeholdr'), power: powertype_t.pw_ironfeet },
+  { seq: makeCheatSeq('idbeholda'), power: powertype_t.pw_allmap },
+  { seq: makeCheatSeq('idbeholdl'), power: powertype_t.pw_infrared },
+];
+const beholdCheat = makeCheatSeq('idbehold');
+const choppersCheat = makeCheatSeq('idchoppers');
+const myposCheat = makeCheatSeq('idmypos');
+const clevCheat = makeCheatSeq('idclev', 2);
+
 // Driven by keyboard listener — each lowercase letter advances all sequences.
 export function cht_HandleKey(charCode) {
-  // st_stuff.c:543 — cheats are not even advanced while a netgame is active.
-  // Returning before cht_CheckCheat also prevents a partial sequence typed in
-  // multiplayer from completing after the player leaves the netgame.
-  if (netgame) return;
   const p = players[consoleplayer];
   if (p === undefined || p === null || p.mo === null) return;
-  for (const c of cheats) {
-    if (cht_CheckCheat(c.seq, charCode) === 1) {
-      c.apply(p, c.seq);
+
+  // st_stuff.c:543 — ordinary status cheats are neither applied nor advanced
+  // in netgames. idclev is deliberately checked outside this block below.
+  if (netgame === false) {
+    for (const c of cheats) {
+      if (cht_CheckCheat(c.seq, charCode) === 1) {
+        c.apply(p, c.seq);
+        console.log('CHEAT:', p.message);
+      }
+    }
+    for (const c of powerCheats) {
+      if (cht_CheckCheat(c.seq, charCode) === 1) {
+        if (_P_GivePower === null) throw new Error('cheat P_GivePower hook is not wired');
+        M_TogglePowerCheat(p, c.power, _P_GivePower);
+        p.message = STSTR_BEHOLDX;
+        console.log('CHEAT:', p.message);
+      }
+    }
+    if (cht_CheckCheat(beholdCheat, charCode) === 1) {
+      p.message = STSTR_BEHOLD;
+      console.log('CHEAT:', p.message);
+    } else if (cht_CheckCheat(choppersCheat, charCode) === 1) {
+      M_ApplyChoppersCheat(p);
+      p.message = STSTR_CHOPPERS;
+      console.log('CHEAT:', p.message);
+    } else if (cht_CheckCheat(myposCheat, charCode) === 1) {
+      p.message = M_PlayerPositionMessage(p.mo);
       console.log('CHEAT:', p.message);
     }
+  }
+
+  if (cht_CheckCheat(clevCheat, charCode) === 1) {
+    const buf = new Uint8Array(3);
+    cht_GetParam(clevCheat, buf);
+    const destination = M_ParseClev(gamemode, buf[0], buf[1]);
+    if (destination === null) return;
+    if (_G_DeferedInitNew === null) throw new Error('cheat G_DeferedInitNew hook is not wired');
+    p.message = STSTR_CLEV;
+    _G_DeferedInitNew(gameskill, destination.episode, destination.map);
+    console.log('CHEAT:', p.message);
   }
 }

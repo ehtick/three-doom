@@ -711,6 +711,11 @@ export async function D_DoomMain() {
   // Wire p_user → p_inter, p_inter → sound/mobj/psprite, p_map → p_inter + thinkercap.
   const pInter = await import('./p_inter.js');
   pInter.P_InterSetExternals({ S, PM, P_DropWeapon: pp.P_DropWeapon });
+  const mCheat = await import('./m_cheat.js');
+  mCheat.M_CheatSetExternals({
+    P_GivePower: pInter.P_GivePower,
+    G_DeferedInitNew: _GGame.G_DeferedInitNew,
+  });
   pp.P_PsprSetMobj({ PMobj: PM, PInter: pInter });
   const pTick = await import('./p_tick.js');
   pMap.P_MapSetExternals({ PInter: pInter, PMobj: PM, thinkercap: pTick.thinkercap });
