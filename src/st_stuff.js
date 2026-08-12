@@ -10,8 +10,9 @@ import { M_Random } from './m_random.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { ANG45, ANG180 } from './tables.js';
 import {
-  ST_ARMORX, ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX,
-  ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
+  ST_AMMO_CURRENT_X, ST_AMMO_MAX_X, ST_AMMO_Y, ST_ARMORX,
+  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX, ST_FRAGSWIDTH,
+  ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from './st_status_logic.js';
 
 // Patches are decoded + cached centrally in v_video.js (V_DecodePatchToCanvas).
@@ -393,9 +394,10 @@ export function ST_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {
   }
   // 8) Small ammo readout (BULL/SHEL/RCKT/CELL labels live on STBAR itself;
   // we draw current/max in yellow STYSNUM digits, right-aligned).
-  const ammoY = [173, 179, 185, 191];
   for (let i = 0; i < 4; i++) {
-    drawNumber(overlayCtx, p.ammo[i],    dstX + 287 * sx, dstY + ammoY[i] * sy, sx, sy, 'STYSNUM');
-    drawNumber(overlayCtx, p.maxammo[i], dstX + 314 * sx, dstY + ammoY[i] * sy, sx, sy, 'STYSNUM');
+    drawNumber(overlayCtx, p.ammo[i], dstX + ST_AMMO_CURRENT_X * sx,
+      dstY + ST_AMMO_Y[i] * sy, sx, sy, 'STYSNUM');
+    drawNumber(overlayCtx, p.maxammo[i], dstX + ST_AMMO_MAX_X * sx,
+      dstY + ST_AMMO_Y[i] * sy, sx, sy, 'STYSNUM');
   }
 }

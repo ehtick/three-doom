@@ -140,12 +140,34 @@ try {
     const cardVsSkullMismatch = imageMismatch(cardOnly, skullOnly, ...keyRegion);
     player.cards.fill(false);
 
+    // Reconstruct the complete ammo region from the real STBAR/STYSNUM WAD
+    // patches. Distinct single digits make a CELL/RCKT row swap observable.
+    for (let i = 0; i < 4; i++) {
+      player.ammo[i] = i + 1;
+      player.maxammo[i] = i + 5;
+    }
+    const ammoStatus = renderStatus();
+    const expectedAmmo = document.createElement('canvas');
+    expectedAmmo.width = 320;
+    expectedAmmo.height = 200;
+    const ammoTarget = expectedAmmo.getContext('2d');
+    patch(ammoTarget, 'STBAR', 0, 168);
+    const ammoRows = [173, 179, 191, 185];
+    for (let i = 0; i < 4; i++) {
+      const current = video.V_DecodePatchToCanvas(`STYSNUM${i + 1}`);
+      const maximum = video.V_DecodePatchToCanvas(`STYSNUM${i + 5}`);
+      ammoTarget.drawImage(current.canvas, 288 - current.w, ammoRows[i]);
+      ammoTarget.drawImage(maximum.canvas, 314 - maximum.w, ammoRows[i]);
+    }
+    const ammoRegionMismatch = imageMismatch(ammoStatus, expectedAmmo, 270, 168, 50, 32);
+
     return {
       ...percentResult,
       normalMiddleMismatch,
       deathmatchMiddleMismatch,
       combinedVsSkullMismatch,
       cardVsSkullMismatch,
+      ammoRegionMismatch,
     };
   });
 
@@ -163,6 +185,9 @@ try {
   }
   if (result.combinedVsSkullMismatch !== 0 || result.cardVsSkullMismatch === 0) {
     failures.push(`key override: ${JSON.stringify(result)}`);
+  }
+  if (result.ammoRegionMismatch !== 0) {
+    failures.push(`ammo counters: ${JSON.stringify(result)}`);
   }
   if (errors.length !== 0) failures.push(`page errors: ${errors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));

@@ -1,6 +1,7 @@
 import {
-  ST_ARMORX, ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX,
-  ST_FRAGSWIDTH, ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
+  ST_AMMO_CURRENT_X, ST_AMMO_MAX_X, ST_AMMO_Y, ST_ARMORX,
+  ST_BIG_NUMBER_Y, ST_DeathmatchStatusPlan, ST_FRAGSX, ST_FRAGSWIDTH,
+  ST_HEALTHX, ST_KeyPatch, ST_PERCENT_PATCH,
 } from '../src/st_status_logic.js';
 
 function assertEquals(actual, expected, message) {
@@ -14,6 +15,14 @@ Deno.test('health and armor percent widgets use the reference patch anchors', ()
     { patch: ST_PERCENT_PATCH, y: ST_BIG_NUMBER_Y, healthX: ST_HEALTHX, armorX: ST_ARMORX },
     { patch: 'STTPRCNT', y: 171, healthX: 90, armorX: 221 },
     'STlib percent layout',
+  );
+});
+
+Deno.test('ammo counters use the reference enum-to-row mapping', () => {
+  assertEquals(
+    { currentX: ST_AMMO_CURRENT_X, maxX: ST_AMMO_MAX_X, rows: ST_AMMO_Y },
+    { currentX: 288, maxX: 314, rows: [173, 179, 191, 185] },
+    'ammo widget geometry',
   );
 });
 

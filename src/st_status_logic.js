@@ -6,6 +6,11 @@ export const ST_BIG_NUMBER_Y = 171;
 export const ST_PERCENT_PATCH = 'STTPRCNT';
 export const ST_FRAGSX = 138;
 export const ST_FRAGSWIDTH = 2;
+export const ST_AMMO_CURRENT_X = 288;
+export const ST_AMMO_MAX_X = 314;
+// Ammo enums are clip, shell, cell, missile; the status-bar labels are
+// BULL, SHEL, RCKT, CELL, so cells and rockets deliberately cross rows.
+export const ST_AMMO_Y = Object.freeze([173, 179, 191, 185]);
 
 export function ST_DeathmatchStatusPlan(deathmatch, frags, consoleplayer) {
   const active = deathmatch !== 0;
