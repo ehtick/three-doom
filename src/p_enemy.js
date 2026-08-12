@@ -5,7 +5,7 @@
 // corpse resurrection).
 
 import { P_RegisterAction, states, mobjinfo, actionRegistry, S_BRAINEXPLODE1, S_VILE_HEAL1 } from './info.js';
-import { P_SetMobjState, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, MF_SOLID, MF_SKULLFLY, MF_CORPSE, P_SpawnMissile, P_SpawnMobj, P_SpawnPuff, P_RemoveMobj } from './p_mobj.js';
+import { P_SetMobjState, P_SetThingPosition, P_UnsetThingPosition, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, MF_SOLID, MF_SKULLFLY, MF_CORPSE, P_SpawnMissile, P_SpawnMobj, P_SpawnPuff, P_RemoveMobj } from './p_mobj.js';
 import { P_TeleportMove, P_CheckPosition } from './p_map.js';
 import { P_BlockThingsIterator } from './p_maputl.js';
 import { bmaporgx, bmaporgy } from './p_setup.js';
@@ -21,6 +21,7 @@ import { EV_DoDoor } from './p_doors.js';
 import { P_Random } from './m_random.js';
 import { A_Chase } from './p_enemy_chase.js';
 import { P_PainSkullCoordinate } from './p_enemy_spawn_logic.js';
+import { P_RelinkVileFire } from './p_enemy_fire_logic.js';
 
 // External wiring.
 let _S = null;
@@ -844,9 +845,14 @@ P_RegisterAction('A_Fire', (a) => {
   if (dest === null || dest === undefined) return;
   if (a.target === null || !P_CheckSight(a.target, dest)) return;
   const fa = (dest.angle >>> ANGLETOFINESHIFT) & FINEMASK;
-  a.x = (dest.x + (24 * finecosine[fa])) | 0;
-  a.y = (dest.y + (24 * finesine[fa]))   | 0;
-  a.z = dest.z;
+  P_RelinkVileFire(
+    a,
+    dest,
+    finecosine[fa],
+    finesine[fa],
+    P_UnsetThingPosition,
+    P_SetThingPosition,
+  );
 });
 P_RegisterAction('A_VileTarget', (actor) => {
   if (actor.target === null) return;
