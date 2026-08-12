@@ -23,7 +23,11 @@ export {
 import { GameMode_t, KEY_UPARROW, KEY_DOWNARROW, KEY_LEFTARROW, KEY_RIGHTARROW,
   KEY_BACKSPACE, KEY_ESCAPE, KEY_ENTER, KEY_EQUALS, KEY_MINUS, KEY_F1,
   KEY_F11 } from './doomdef.js';
-import { G_DeferedInitNew, G_LoadGame, G_SaveGame } from './g_game.js';
+import {
+  G_DeferedInitNew,
+  G_LoadGame as G_QueueLoadGame,
+  G_SaveGame as G_QueueSaveGame,
+} from './g_game.js';
 // m_menu.c sprinkles S_StartSound through M_Responder for UI feedback: pstop on
 // cursor move, pistol on select, stnmov on slider, swtchn/swtchx on open/back/
 // close, oof on an invalid action.
@@ -45,7 +49,8 @@ import { I_SetPalette } from './i_video.js';
 import { W_CacheLumpName } from './w_wad.js';
 import {
   ENDGAME, GAMMALVL0, GAMMALVL1, GAMMALVL2, GAMMALVL3, GAMMALVL4,
-  NETEND, NEWGAME,
+  EMPTYSTRING, LOADNET, NETEND, NEWGAME, QLOADNET, QLPROMPT, QSPROMPT,
+  QSAVESPOT, SAVEDEAD,
 } from './d_englsh.js';
 import { M_EndGameRoute } from './m_menu_endgame_logic.js';
 import {
@@ -57,7 +62,12 @@ import { M_MessageAcceptsKey } from './m_menu_message_logic.js';
 import { M_NewGameRoute } from './m_menu_newgame_logic.js';
 import { M_ReadThisPlan } from './m_menu_read_logic.js';
 import { M_ClosedShortcutRoute } from './m_menu_shortcut_logic.js';
-import { HU_DrawLayout, HU_GetFont } from './hu_font.js';
+import {
+  M_ApplySaveEditKey, M_BeginSaveEdit, M_FormatSavePrompt,
+  M_NormalizeSaveSlots, M_QuickLoadRoute, M_QuickSaveRoute,
+  QUICK_SAVE_NONE, QUICK_SAVE_PICKING, SAVE_SLOTS,
+} from './m_menu_save_logic.js';
+import { HU_DrawLayout, HU_GetFont, HU_LayoutText, HU_TextWidth } from './hu_font.js';
 import { M_LayoutMessage } from './m_menu_text.js';
 import { R_GetScreenblocks, R_SetViewSize } from './r_view.js';
 const getPatch = V_DecodePatchToCanvas;
@@ -100,9 +110,10 @@ export function isStatusBarVisible() {
   return R_GetScreenblocks() < 11 || automapactive === true;
 }
 
-// Save-slot names.
-const SAVE_SLOTS = 6;
-const _saveStrings = new Array(SAVE_SLOTS).fill('EMPTY SLOT');
+// Save-slot descriptions and native LoadMenu status values. A missing save is
+// still a cursor/alpha target, but its action is disabled.
+const _saveStrings = new Array(SAVE_SLOTS).fill(EMPTYSTRING);
+const _loadSlotEnabled = new Array(SAVE_SLOTS).fill(false);
 
 // ---------- Menus ----------
 const CONTINUE_ITEM = {
@@ -113,15 +124,16 @@ const MAIN_MENU_ITEMS = {
   continue: CONTINUE_ITEM,
   newgame: { menuKey: 'newgame', patch: 'M_NGAME', label: 'New Game', alphaKey: M_ALPHA_KEYS.main[0], action: () => M_NewGame() },
   options: { menuKey: 'options', patch: 'M_OPTION', label: 'Options', alphaKey: M_ALPHA_KEYS.main[1], action: () => pushMenu(OPTIONS_MENU) },
-  readthis: { menuKey: 'readthis', patch: 'M_RDTHIS', label: 'Read This!', alphaKey: M_ALPHA_KEYS.main[2], action: () => pushMenu(READ_MENU_1) },
-  quit: { menuKey: 'quit', patch: 'M_QUITG', label: 'Quit', alphaKey: M_ALPHA_KEYS.main[3], action: () => M_QuitDOOM() },
+  loadgame: { menuKey: 'loadgame', patch: 'M_LOADG', label: 'Load Game', alphaKey: M_ALPHA_KEYS.main[2], action: () => M_LoadGame() },
+  savegame: { menuKey: 'savegame', patch: 'M_SAVEG', label: 'Save Game', alphaKey: M_ALPHA_KEYS.main[3], action: () => M_SaveGame() },
+  readthis: { menuKey: 'readthis', patch: 'M_RDTHIS', label: 'Read This!', alphaKey: M_ALPHA_KEYS.main[4], action: () => pushMenu(READ_MENU_1) },
+  quit: { menuKey: 'quit', patch: 'M_QUITG', label: 'Quit', alphaKey: M_ALPHA_KEYS.main[5], action: () => M_QuitDOOM() },
 };
-// The C menu has Load/Save between Options and Read This. Those browser rows
-// remain intentionally unavailable; mode layout uses the semantic table above
-// rather than pretending the omitted indices exist.
 const MAIN_MENU_BASE_ITEMS = [
   MAIN_MENU_ITEMS.newgame,
   MAIN_MENU_ITEMS.options,
+  MAIN_MENU_ITEMS.loadgame,
+  MAIN_MENU_ITEMS.savegame,
   MAIN_MENU_ITEMS.readthis,
   MAIN_MENU_ITEMS.quit,
 ];
@@ -230,15 +242,22 @@ SOUND_MENU.draw = (ctx, lx, ly, sx, sy) => {
   M_DrawThermo(ctx, x, y + LH * 3, 16, musicVolume, lx, ly, sx, sy);  // music_vol+1
 };
 
-// Slot items use a getter for `label` so the displayed text tracks
-// _saveStrings as it changes (e.g. after a save) instead of capturing the
-// initial 'EMPTY SLOT' string forever.
-const LOAD_MENU = { name: 'Load Game', x: 80, y: 54, save: true, items:
-  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', alphaKey: M_ALPHA_KEYS.slots[i], get label() { return _saveStrings[i]; }, action: () => _loadSlot(i) })),
+// Empty names match LoadMenu/SaveMenu in C: their draw routines render the
+// bordered STCFN descriptions, while the generic item pass only advances rows.
+const LOAD_MENU = { name: 'Load Game', x: 80, y: 54, items:
+  Array.from({ length: SAVE_SLOTS }, (_, i) => ({
+    patch: '', label: '', alphaKey: M_ALPHA_KEYS.slots[i],
+    enabled: () => _loadSlotEnabled[i], action: () => M_LoadSelect(i),
+  })),
 };
-const SAVE_MENU = { name: 'Save Game', x: 80, y: 54, save: true, items:
-  Array.from({ length: SAVE_SLOTS }, (_, i) => ({ patch: '', alphaKey: M_ALPHA_KEYS.slots[i], get label() { return _saveStrings[i]; }, action: () => _saveSlot(i) })),
+LOAD_MENU.draw = (ctx, lx, ly, sx, sy) => M_DrawLoad(ctx, lx, ly, sx, sy);
+const SAVE_MENU = { name: 'Save Game', x: 80, y: 54, items:
+  Array.from({ length: SAVE_SLOTS }, (_, i) => ({
+    patch: '', label: '', alphaKey: M_ALPHA_KEYS.slots[i],
+    action: () => M_SaveSelect(i),
+  })),
 };
+SAVE_MENU.draw = (ctx, lx, ly, sx, sy) => M_DrawSave(ctx, lx, ly, sx, sy);
 
 const READ_MENU_1 = { name: 'Read This',
   get x() { return M_ReadThisPlan(gamemode).firstX; },
@@ -297,8 +316,10 @@ export function M_SetMusicVolume(value) {
 
 // ---------- Modal message prompt ----------
 let _message = null;    // { text, routine, input, tapKey, lastMenuActive }
-let _input = false;     // input echo for save slot edit
+let _saveStringEnter = false;
 let _saveEditingSlot = -1;
+let _saveOldString = EMPTYSTRING;
+let _quickSaveSlot = QUICK_SAVE_NONE;
 
 export function M_StartMessage(text, routine, input, tapKey = null) {
   _message = {
@@ -332,8 +353,10 @@ function dismissMessage(key) {
 // when D_DoomLoop wires the other menu callbacks, avoiding a d_main <-> m_menu
 // static import cycle or a mutable global function.
 let _startTitle = null;
+let _listSaves = () => [];
 export function M_SetExternals(refs) {
   if (typeof refs?.D_StartTitle === 'function') _startTitle = refs.D_StartTitle;
+  if (typeof refs?.listSaves === 'function') _listSaves = refs.listSaves;
 }
 
 // m_menu.c:996-1022 — only a lowercase Y ends the game. M_Responder closes
@@ -426,13 +449,107 @@ function _doStart(skill) {
   D_AcquirePointerLock();
 }
 
-function _loadSlot(slot) {
-  G_LoadGame(`doom:save:${slot}`);
+function M_ReadSaveStrings() {
+  let records = [];
+  try { records = _listSaves(); } catch (_) { records = []; }
+  const slots = M_NormalizeSaveSlots(records);
+  for (let i = 0; i < SAVE_SLOTS; i++) {
+    _saveStrings[i] = slots[i].description;
+    _loadSlotEnabled[i] = slots[i].occupied;
+  }
+}
+
+function M_LoadSelect(slot) {
+  G_QueueLoadGame(slot);
   M_ClearMenus();
 }
-function _saveSlot(slot) {
-  G_SaveGame(slot, _saveStrings[slot] === 'EMPTY SLOT' ? `Slot ${slot + 1}` : _saveStrings[slot]);
+
+function M_LoadGame() {
+  if (netgame === true) {
+    M_StartMessage(LOADNET, null, false);
+    return;
+  }
+  pushMenu(LOAD_MENU);
+  M_ReadSaveStrings();
+}
+
+function M_DoSave(slot) {
+  G_QueueSaveGame(slot, _saveStrings[slot]);
   M_ClearMenus();
+  if (_quickSaveSlot === QUICK_SAVE_PICKING) _quickSaveSlot = slot;
+}
+
+function M_SaveSelect(slot) {
+  const edit = M_BeginSaveEdit(_saveStrings[slot]);
+  _saveStringEnter = true;
+  _saveEditingSlot = slot;
+  _saveOldString = edit.oldText;
+  _saveStrings[slot] = edit.text;
+}
+
+function M_SaveGame() {
+  if (usergame !== true) {
+    M_StartMessage(SAVEDEAD, null, false);
+    return;
+  }
+  if (gamestate !== 0 /*GS_LEVEL*/) return;
+  pushMenu(SAVE_MENU);
+  M_ReadSaveStrings();
+}
+
+function M_QuickSaveResponse(key) {
+  if (key !== 0x79 /*y*/) return;
+  M_DoSave(_quickSaveSlot);
+  // The outer message-dismiss path plays the same sound again, matching C.
+  S_StartSound(null, sfx_swtchx);
+}
+
+function M_QuickSave() {
+  switch (M_QuickSaveRoute(usergame, gamestate, _quickSaveSlot)) {
+    case 'inactive':
+      S_StartSound(null, sfx_oof);
+      return;
+    case 'nonlevel':
+      return;
+    case 'pick':
+      M_StartControlPanel(false);
+      M_ReadSaveStrings();
+      pushMenu(SAVE_MENU);
+      _quickSaveSlot = QUICK_SAVE_PICKING;
+      return;
+    case 'confirm':
+      M_StartMessage(
+        M_FormatSavePrompt(QSPROMPT, _saveStrings[_quickSaveSlot]),
+        M_QuickSaveResponse,
+        true,
+      );
+      return;
+  }
+}
+
+function M_QuickLoadResponse(key) {
+  if (key !== 0x79 /*y*/) return;
+  M_LoadSelect(_quickSaveSlot);
+  // The outer message-dismiss path plays the same sound again, matching C.
+  S_StartSound(null, sfx_swtchx);
+}
+
+function M_QuickLoad() {
+  switch (M_QuickLoadRoute(netgame, _quickSaveSlot)) {
+    case 'netgame':
+      M_StartMessage(QLOADNET, null, false);
+      return;
+    case 'no-slot':
+      M_StartMessage(QSAVESPOT, null, false);
+      return;
+    case 'confirm':
+      M_StartMessage(
+        M_FormatSavePrompt(QLPROMPT, _saveStrings[_quickSaveSlot]),
+        M_QuickLoadResponse,
+        true,
+      );
+      return;
+  }
 }
 
 // ---------- Quit ----------
@@ -468,6 +585,10 @@ export function M_Init() {
   _selected = 0;
   _skullFrame = 0;
   _skullTicker = 0;
+  _saveStringEnter = false;
+  _saveEditingSlot = -1;
+  _saveOldString = EMPTYSTRING;
+  _quickSaveSlot = QUICK_SAVE_NONE;
 }
 export function M_StartControlPanel(playOpenSound = true) {
   if (menuactive) return;
@@ -505,10 +626,34 @@ export function M_Ticker() {
 }
 
 // ---------- Input ----------
+function M_HandleSaveStringKey(key) {
+  const slot = _saveEditingSlot;
+  if (slot < 0 || slot >= SAVE_SLOTS) {
+    _saveStringEnter = false;
+    return true;
+  }
+  const result = M_ApplySaveEditKey(
+    _saveStrings[slot],
+    _saveOldString,
+    key,
+    (text) => HU_TextWidth(text, HU_GetFont()),
+  );
+  _saveStrings[slot] = result.text;
+  if (result.kind === 'editing') return true;
+
+  _saveStringEnter = false;
+  _saveEditingSlot = -1;
+  if (result.kind === 'finish' && result.save === true) M_DoSave(slot);
+  return true;
+}
+
 export function M_Responder(ev) {
   if (ev === undefined || ev === null) return false;
   if (ev.type !== 0 /*ev_keydown*/) return false;
   const key = ev.data1;
+  // m_menu.c:1452 — save-name entry owns every key before messages, function
+  // keys, and ordinary menu navigation.
+  if (_saveStringEnter === true) return M_HandleSaveStringKey(key);
   // m_menu.c:1494-1512 — informational messages dismiss on any key. Prompts
   // that need input accept only Space/N/Y/Escape; every other key falls
   // through to the remaining responders.
@@ -524,10 +669,19 @@ export function M_Responder(ev) {
     S_StartSound(null, sfx_stnmov);
     return true;
   }
-  // m_menu.c:1549-1595 — retain the browser-supported closed-menu F-keys.
-  // F2/F3/F6/F9 remain intentionally absent with Save/Load/QuickSave/QuickLoad.
+  // m_menu.c:1548-1595 — closed-menu function-key actions and sound order.
   if (menuactive !== true) {
     switch (M_ClosedShortcutRoute(key)) {
+      case 'save':
+        M_StartControlPanel(false);
+        S_StartSound(null, sfx_swtchn);
+        M_SaveGame();
+        return true;
+      case 'load':
+        M_StartControlPanel(false);
+        S_StartSound(null, sfx_swtchn);
+        M_LoadGame();
+        return true;
       case 'sound':
         // SoundDef's source parent is OptionsDef, and F4 always starts on
         // sfx_vol. Install that state before the one switch-on sound.
@@ -541,6 +695,10 @@ export function M_Responder(ev) {
         M_ChangeDetail();
         S_StartSound(null, sfx_swtchn);
         return true;
+      case 'quicksave':
+        S_StartSound(null, sfx_swtchn);
+        M_QuickSave();
+        return true;
       case 'endgame':
         S_StartSound(null, sfx_swtchn);
         M_EndGame();
@@ -548,6 +706,10 @@ export function M_Responder(ev) {
       case 'messages':
         HU_ToggleMessages();
         S_StartSound(null, sfx_swtchn);
+        return true;
+      case 'quickload':
+        S_StartSound(null, sfx_swtchn);
+        M_QuickLoad();
         return true;
       case 'quit':
         S_StartSound(null, sfx_swtchn);
@@ -605,7 +767,8 @@ export function M_Responder(ev) {
       _rememberCursor(m);
       it.set(it.get() + 1);
       S_StartSound(null, sfx_stnmov);
-    } else if (it.action != null) {
+    } else if (it.action != null &&
+               (typeof it.enabled !== 'function' || it.enabled() === true)) {
       _rememberCursor(m);
       it.action();
       S_StartSound(null, sfx_pistol);
@@ -632,6 +795,9 @@ export function M_Responder(ev) {
 // returns true when the tap was consumed.
 export function M_HandleTap(px, py) {
   if (menuactive !== true) return false;
+  // Native maps the primary mouse button to Enter before saveStringEnter is
+  // handled. A follow-up tap therefore commits the edited description.
+  if (_saveStringEnter === true) return M_HandleSaveStringKey(KEY_ENTER);
   // Prompts remain keyboard-only unless their call site explicitly assigns a
   // tap key. Quit maps a tap to lowercase Y so touch users can confirm it.
   if (_message !== null) {
@@ -671,7 +837,8 @@ export function M_HandleTap(px, py) {
     const knobX = m.x + 8 + it.get() * 8 + 4;
     it.set(dx < knobX ? it.get() - 1 : it.get() + 1);
     S_StartSound(null, sfx_stnmov);
-  } else if (it.action != null) {
+  } else if (it.action != null &&
+             (typeof it.enabled !== 'function' || it.enabled() === true)) {
     _rememberCursor(m);
     it.action();
     S_StartSound(null, sfx_pistol);
@@ -705,6 +872,58 @@ function M_DrawThermo(ctx, x, y, thermWidth, thermDot, lx, ly, sx, sy) {
   }
   _drawPatchDoom(ctx, 'M_THERMR', xx, y, lx, ly, sx, sy);
   _drawPatchDoom(ctx, 'M_THERMO', (x + 8) + thermDot * 8, y, lx, ly, sx, sy);
+}
+
+// m_menu.c:559-572 — the description box is one left cap, 24 center cells,
+// and one right cap. Patch origins are honored by _drawPatchDoom.
+function M_DrawSaveLoadBorder(ctx, x, y, lx, ly, sx, sy) {
+  _drawPatchDoom(ctx, 'M_LSLEFT', x - 8, y + 7, lx, ly, sx, sy);
+  for (let i = 0; i < 24; i++) {
+    _drawPatchDoom(ctx, 'M_LSCNTR', x + i * 8, y + 7, lx, ly, sx, sy);
+  }
+  _drawPatchDoom(ctx, 'M_LSRGHT', x + 24 * 8, y + 7, lx, ly, sx, sy);
+}
+
+function M_DrawMenuText(ctx, text, x, y, lx, ly, sx, sy) {
+  HU_DrawLayout(
+    ctx,
+    HU_LayoutText(text, HU_GetFont(), { x, y }),
+    lx,
+    ly,
+    sx,
+    sy,
+  );
+}
+
+function M_DrawLoad(ctx, lx, ly, sx, sy) {
+  _drawPatchDoom(ctx, 'M_LOADG', 72, 28, lx, ly, sx, sy);
+  for (let i = 0; i < SAVE_SLOTS; i++) {
+    const y = LOAD_MENU.y + LINE_HEIGHT * i;
+    M_DrawSaveLoadBorder(ctx, LOAD_MENU.x, y, lx, ly, sx, sy);
+    M_DrawMenuText(ctx, _saveStrings[i], LOAD_MENU.x, y, lx, ly, sx, sy);
+  }
+}
+
+function M_DrawSave(ctx, lx, ly, sx, sy) {
+  _drawPatchDoom(ctx, 'M_SAVEG', 72, 28, lx, ly, sx, sy);
+  for (let i = 0; i < SAVE_SLOTS; i++) {
+    const y = SAVE_MENU.y + LINE_HEIGHT * i;
+    M_DrawSaveLoadBorder(ctx, SAVE_MENU.x, y, lx, ly, sx, sy);
+    M_DrawMenuText(ctx, _saveStrings[i], SAVE_MENU.x, y, lx, ly, sx, sy);
+  }
+  if (_saveStringEnter === true && _saveEditingSlot >= 0) {
+    const text = _saveStrings[_saveEditingSlot];
+    M_DrawMenuText(
+      ctx,
+      '_',
+      SAVE_MENU.x + HU_TextWidth(text, HU_GetFont()),
+      SAVE_MENU.y + LINE_HEIGHT * _saveEditingSlot,
+      lx,
+      ly,
+      sx,
+      sy,
+    );
+  }
 }
 
 export function M_Drawer(overlayCtx, dstX, dstY, dstW, dstH) {

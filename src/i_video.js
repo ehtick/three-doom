@@ -485,7 +485,7 @@ export function I_TranslateKey(e) {
     case 'Escape':     return KEY_ESCAPE;
     case 'Enter':      return KEY_ENTER;
     case 'Tab':        return KEY_TAB;
-    case 'Backspace':  return KEY_BACKSPACE;
+    case 'Backspace': case 'Delete': return KEY_BACKSPACE;
     case 'Pause':      return KEY_PAUSE;
     case 'F1': return KEY_F1; case 'F2': return KEY_F2;
     case 'F3': return KEY_F3; case 'F4': return KEY_F4;

@@ -68,8 +68,8 @@ try {
       const ctx = value.getContext('2d');
       const y = commercial ? 72 : 64;
       const names = commercial
-        ? ['M_NGAME', 'M_OPTION', 'M_QUITG']
-        : ['M_NGAME', 'M_OPTION', 'M_RDTHIS', 'M_QUITG'];
+        ? ['M_NGAME', 'M_OPTION', 'M_LOADG', 'M_SAVEG', 'M_QUITG']
+        : ['M_NGAME', 'M_OPTION', 'M_LOADG', 'M_SAVEG', 'M_RDTHIS', 'M_QUITG'];
       patch(ctx, 'M_DOOM', 94, 2);
       for (let i = 0; i < names.length; i++) patch(ctx, names[i], 97, y + i * 16);
       patch(ctx, 'M_SKULL1', 65, y - 5 + selected * 16);
@@ -99,14 +99,13 @@ try {
     function testTwoPage(mode, secondPatch) {
       openMain(mode);
       const mainMismatch = mismatchCount(actualCanvas(), expectedMain(false));
-      key(KEY_DOWNARROW);
-      key(KEY_DOWNARROW);
+      for (let i = 0; i < 4; i++) key(KEY_DOWNARROW);
       key(KEY_ENTER); // Read This -> ReadDef1.
       const firstMismatch = mismatchCount(actualCanvas(), expectedHelp('HELP1'));
       key(KEY_ENTER); // ReadDef1 -> ReadDef2.
       const secondMismatch = mismatchCount(actualCanvas(), expectedHelp(secondPatch, true));
       key(KEY_ENTER); // M_FinishReadThis -> MainDef, still active.
-      const finishMismatch = mismatchCount(actualCanvas(), expectedMain(false, 2));
+      const finishMismatch = mismatchCount(actualCanvas(), expectedMain(false, 4));
       return {
         mainMismatch, firstMismatch, secondMismatch, finishMismatch,
         activeAfterFinish: doomstat.menuactive,
@@ -128,29 +127,24 @@ try {
     const retailBack = key(KEY_BACKSPACE);
     const retailBackMismatch = mismatchCount(actualCanvas(), expectedHelp('HELP1'));
 
-    // Commercial removes Read This, shifts the real remaining rows down 8,
-    // and Continue prefixes only the rows that actually exist in this port.
+    // Commercial removes Read This, shifts the remaining native rows down 8,
+    // and Continue prefixes those rows only while a live level is active.
     openMain(GameMode_t.commercial);
     const commercialMain = expectedMain(true);
     const commercialMainMismatch = mismatchCount(actualCanvas(), commercialMain);
-    key(KEY_DOWNARROW);
-    key(KEY_DOWNARROW); // Quit is the third and final visible row.
+    for (let i = 0; i < 4; i++) key(KEY_DOWNARROW); // Quit is row 4.
     const commercialQuit = key(KEY_ENTER);
     const commercialQuitRejectsX = key(0x78 /*x*/) === false;
     const commercialQuitDismissed = key(0x6e /*n*/);
 
     openMain(GameMode_t.commercial, true);
-    key(KEY_DOWNARROW);
-    key(KEY_DOWNARROW);
-    key(KEY_DOWNARROW); // Continue, New Game, Options, Quit.
+    for (let i = 0; i < 5; i++) key(KEY_DOWNARROW); // Continue prefixes Quit at row 5.
     const commercialContinueQuit = key(KEY_ENTER);
     const commercialContinueRejectsX = key(0x78 /*x*/) === false;
     key(0x6e /*n*/);
 
     openMain(GameMode_t.shareware, true);
-    key(KEY_DOWNARROW);
-    key(KEY_DOWNARROW);
-    key(KEY_DOWNARROW); // Continue, New Game, Options, Read This.
+    for (let i = 0; i < 5; i++) key(KEY_DOWNARROW); // Continue prefixes Read This at row 5.
     const doom1ContinueRead = key(KEY_ENTER);
     const doom1ContinueHelpMismatch = mismatchCount(actualCanvas(), expectedHelp('HELP1'));
 

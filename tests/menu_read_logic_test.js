@@ -8,7 +8,7 @@ function assertEquals(actual, expected, message) {
 }
 
 Deno.test('Read This page routing matches every game-mode draw routine and M_Init hack', () => {
-  const base = ['newgame', 'options', 'readthis', 'quit'];
+  const base = ['newgame', 'options', 'loadgame', 'savegame', 'readthis', 'quit'];
   for (const mode of [GameMode_t.shareware, GameMode_t.registered]) {
     assertEquals(M_ReadThisPlan(mode), {
       mainItems: base,
@@ -32,7 +32,7 @@ Deno.test('Read This page routing matches every game-mode draw routine and M_Ini
     shortcutPage: 'second',
   }, 'retail');
   assertEquals(M_ReadThisPlan(GameMode_t.commercial), {
-    mainItems: ['newgame', 'options', 'quit'],
+    mainItems: ['newgame', 'options', 'loadgame', 'savegame', 'quit'],
     mainY: 72,
     firstPatch: 'HELP',
     firstX: 330,
@@ -56,13 +56,13 @@ Deno.test('Read This page routing matches every game-mode draw routine and M_Ini
 Deno.test('Continue prefixes real browser rows without changing commercial layout', () => {
   assertEquals(
     M_ReadThisPlan(GameMode_t.shareware, true).mainItems,
-    ['continue', 'newgame', 'options', 'readthis', 'quit'],
+    ['continue', 'newgame', 'options', 'loadgame', 'savegame', 'readthis', 'quit'],
     'Doom 1 Continue rows',
   );
   const commercial = M_ReadThisPlan(GameMode_t.commercial, true);
   assertEquals(
     commercial.mainItems,
-    ['continue', 'newgame', 'options', 'quit'],
+    ['continue', 'newgame', 'options', 'loadgame', 'savegame', 'quit'],
     'commercial Continue rows',
   );
   assertEquals(commercial.mainY, 72, 'commercial +8 y adjustment with Continue');
@@ -73,9 +73,9 @@ Deno.test('menu integration uses semantic rows and mode-specific help actions', 
   const mainStart = source.indexOf('const MAIN_MENU_ITEMS');
   const mainEnd = source.indexOf('const MAIN_MENU =', mainStart);
   const main = source.slice(mainStart, mainEnd);
-  if (main.includes("patch: 'M_LOADG'") || main.includes("patch: 'M_SAVEG'") ||
-      !main.includes('mode layout uses the semantic table above')) {
-    throw new Error('browser menu silently reintroduced or indexed omitted Load/Save rows');
+  if (!main.includes("patch: 'M_LOADG'") || !main.includes("patch: 'M_SAVEG'") ||
+      !main.includes("menuKey: 'loadgame'") || !main.includes("menuKey: 'savegame'")) {
+    throw new Error('native Load/Save rows are absent from the semantic main menu');
   }
   for (const fragment of [
     'M_ReadThisPlan(gamemode, inUserGame)',

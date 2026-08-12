@@ -26,7 +26,12 @@ Deno.test('End Game integration uses exact messages, input flags, sound, and tit
     throw new Error('M_EndGame gates differ from m_menu.c:996-1022');
   }
   const main = await Deno.readTextFile(new URL('../src/d_main.js', import.meta.url));
-  if (!main.includes('mMenu.M_SetExternals({ D_StartTitle });') ||
+  const menuWiring = main.slice(
+    main.indexOf("const mMenu = await import('./m_menu.js');"),
+    main.indexOf('_menuDrawer = mMenu.M_Drawer;'),
+  );
+  if (!menuWiring.includes('D_StartTitle') ||
+      !menuWiring.includes('listSaves: _PSaveg.P_ListSaves') ||
       !main.slice(main.indexOf('export function D_StartTitle()'), main.indexOf('// Overlay canvas'))
         .includes('doomstat.set_gameaction(0 /*ga_nothing*/);')) {
     throw new Error('End Game is not synchronously wired to the full D_StartTitle entry');

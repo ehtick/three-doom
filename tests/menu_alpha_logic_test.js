@@ -9,7 +9,7 @@ function assertEquals(actual, expected, message) {
 Deno.test('menu alpha keys match the active rows and browser Continue is c', () => {
   const chars = (values) => values.map((value) => value === 0 ? '\0' : String.fromCharCode(value));
   assertEquals(String.fromCharCode(M_ALPHA_KEYS.continue), 'c', 'browser Continue');
-  assertEquals(chars(M_ALPHA_KEYS.main), ['n', 'o', 'r', 'q'], 'available main rows');
+  assertEquals(chars(M_ALPHA_KEYS.main), ['n', 'o', 'l', 's', 'r', 'q'], 'main rows');
   assertEquals(chars(M_ALPHA_KEYS.episode), ['k', 't', 'i', 't'], 'EpisodeMenu');
   assertEquals(chars(M_ALPHA_KEYS.skill), ['i', 'h', 'h', 'u', 'n'], 'NewGameMenu');
   assertEquals(chars(M_ALPHA_KEYS.options), ['m', 'g', 's', '\0', 'm', '\0', 's'], 'compact OptionsMenu');

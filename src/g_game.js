@@ -40,17 +40,29 @@ import {
 } from './g_multiplayer.js';
 import { G_NextDisplayPlayer, G_ShouldCycleDisplayPlayer } from './g_spy_logic.js';
 import { G_BuildIntermissionInfo } from './g_completion.js';
+import { GGSAVED } from './d_englsh.js';
 
 let _deferred = null; // pending gameaction params
 
-// External hooks (wired by d_main.js).
-let _loadLevel = null; // async (episode, map, skill) => Promise<void>
+// External hooks (wired by d_main.js). Level setup and save restoration are
+// deliberately synchronous: G_Ticker must see the fully restored world before
+// it continues the same tic into P_Ticker.
+let _loadLevel = null;
 let _spawnPlayer = null;
 let _checkSpot = null;
+let _saveGame = null;
+let _readSave = null;
+let _restoreSave = null;
+let _validateSaveMap = null;
+let _loadAfterSetup = null;
 export function G_SetExternals(refs) {
   if (refs.loadLevel != null) _loadLevel = refs.loadLevel;
   if (refs.P_SpawnPlayer != null) _spawnPlayer = refs.P_SpawnPlayer;
   if (refs.G_CheckSpot != null) _checkSpot = refs.G_CheckSpot;
+  if (refs.saveGame != null) _saveGame = refs.saveGame;
+  if (refs.readSave != null) _readSave = refs.readSave;
+  if (refs.restoreSave != null) _restoreSave = refs.restoreSave;
+  if (refs.validateSaveMap != null) _validateSaveMap = refs.validateSaveMap;
 }
 
 // g_game.c:237 — G_BuildTiccmd. Browser port lives in d_keyboard.js, which
@@ -146,8 +158,8 @@ export function G_Ticker() {
     switch (a) {
       case gameaction_t.ga_loadlevel:  G_DoLoadLevel();   break;
       case gameaction_t.ga_newgame:    G_DoNewGame();     break;
-      case gameaction_t.ga_loadgame:   G_DoLoadGame();    set_gameaction(gameaction_t.ga_nothing); break;
-      case gameaction_t.ga_savegame:   G_DoSaveGame();    set_gameaction(gameaction_t.ga_nothing); break;
+      case gameaction_t.ga_loadgame:   G_DoLoadGame();    break;
+      case gameaction_t.ga_savegame:   G_DoSaveGame();    break;
       case gameaction_t.ga_playdemo:   G_DoPlayDemo();    break;
       case gameaction_t.ga_completed:  G_DoCompleted();   break;
       case gameaction_t.ga_victory:    G_DoVictory();     break;
@@ -258,6 +270,8 @@ export function G_DoReborn(playernum) {
 }
 
 export function G_DoLoadLevel() {
+  const afterSetup = _loadAfterSetup;
+  _loadAfterSetup = null;
   // A queued world transition is processed one tic after the non-level ticker
   // requests it. Retire that still-drawable screen only at the actual exit.
   WI_Stop();
@@ -291,7 +305,7 @@ export function G_DoLoadLevel() {
   // prior level. d_main's load hook clears d_keyboard's queued sendpause with
   // the rest of its browser-local command state after level setup.
   doomstat.set_paused(false);
-  if (_loadLevel !== null) _loadLevel(gameepisode, gamemap, gameskill);
+  if (_loadLevel !== null) _loadLevel(gameepisode, gamemap, gameskill, afterSetup);
   // g_game.c:485 — spying never carries across a level load.
   doomstat.set_displayplayer(consoleplayer);
   // g_game.c sets starttime after P_SetupLevel. Capture both clocks because a
@@ -644,17 +658,53 @@ export function G_SaveGame(slot, description) {
   set_gameaction(gameaction_t.ga_savegame);
 }
 export function G_DoSaveGame() {
-  // p_saveg.P_SaveGame called by the host that has loaded that module.
-  if (typeof globalThis !== 'undefined' && globalThis.__P_SaveGame !== undefined) {
-    globalThis.__P_SaveGame(_savegSlot, _savegDesc);
+  set_gameaction(gameaction_t.ga_nothing);
+  const saved = _saveGame !== null && _saveGame(_savegSlot, _savegDesc) === true;
+  if (saved) {
+    const player = players[consoleplayer];
+    if (player !== null && player !== undefined) player.message = GGSAVED;
   }
+  return saved;
 }
-let _loadName = '';
-export function G_LoadGame(name) { _loadName = name; set_gameaction(gameaction_t.ga_loadgame); }
+let _loadName = 0;
+export function G_LoadGame(slot) { _loadName = slot; set_gameaction(gameaction_t.ga_loadgame); }
 export function G_DoLoadGame() {
-  if (typeof globalThis !== 'undefined' && globalThis.__P_LoadGame !== undefined) {
-    globalThis.__P_LoadGame(_loadName);
+  // Parse and validate before touching the live level. A missing, corrupt, or
+  // wrong-map save must leave the current simulation and renderer intact.
+  set_gameaction(gameaction_t.ga_nothing);
+  if (_readSave === null || _restoreSave === null || _loadLevel === null) return false;
+  const blob = _readSave(_loadName);
+  if (blob === false || blob === null || blob === undefined) return false;
+  if (_validateSaveMap !== null && _validateSaveMap(blob) !== true) return false;
+
+  // The saved topology controls which player starts P_SetupLevel spawns. It
+  // must therefore be installed before G_InitNew and the base-map load.
+  if (!Array.isArray(blob.playeringame) || blob.playeringame.length < MAXPLAYERS) {
+    return false;
   }
+  for (let i = 0; i < MAXPLAYERS; i++) playeringame[i] = blob.playeringame[i] === true;
+
+  // Match g_game.c:G_DoLoadGame: initialize a deterministic base level first,
+  // then dearchive all saved mutations before anything renders or ticks.
+  _deferred = null;
+  G_InitNew(blob.skill, blob.episode, blob.map);
+  let restored = false;
+  _loadAfterSetup = () => {
+    set_leveltime(blob.leveltime);
+    const result = _restoreSave(blob);
+    if (result !== null && result !== undefined &&
+        typeof result === 'object' && typeof result.then === 'function') {
+      I_Error('G_DoLoadGame: save restore must be synchronous');
+    }
+    restored = result === true;
+    if (!restored) I_Error('G_DoLoadGame: save restore failed after level setup');
+  };
+  try {
+    G_DoLoadLevel();
+  } finally {
+    _loadAfterSetup = null;
+  }
+  return restored;
 }
 
 // Level completion / world transitions.

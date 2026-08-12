@@ -4,7 +4,9 @@ const code = (letter) => letter.charCodeAt(0);
 
 export const M_ALPHA_KEYS = Object.freeze({
   continue: code('c'), // Browser-only Continue row; no vanilla equivalent.
-  main: Object.freeze([code('n'), code('o'), code('r'), code('q')]),
+  main: Object.freeze([
+    code('n'), code('o'), code('l'), code('s'), code('r'), code('q'),
+  ]),
   episode: Object.freeze([code('k'), code('t'), code('i'), code('t')]),
   skill: Object.freeze([code('i'), code('h'), code('h'), code('u'), code('n')]),
   // The browser Options menu deliberately omits the source End Game row.

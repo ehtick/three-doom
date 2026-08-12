@@ -16,8 +16,8 @@ Deno.test('dynamic main menus restore the same semantic item', () => {
 
   assertEquals(M_RestoreMainCursor(doom1Title, 'options', 0), 1, 'Doom 1 title Options');
   assertEquals(M_RestoreMainCursor(doom1Game, 'options', 0), 2, 'Doom 1 game Options');
-  assertEquals(M_RestoreMainCursor(doom2Title, 'quit', 0), 2, 'Doom II title Quit');
-  assertEquals(M_RestoreMainCursor(doom2Game, 'quit', 0), 3, 'Doom II game Quit');
+  assertEquals(M_RestoreMainCursor(doom2Title, 'quit', 0), 4, 'Doom II title Quit');
+  assertEquals(M_RestoreMainCursor(doom2Game, 'quit', 0), 5, 'Doom II game Quit');
 });
 
 Deno.test('unavailable dynamic rows fall back to New Game', () => {

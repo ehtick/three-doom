@@ -83,7 +83,8 @@ try {
       menu.M_StartControlPanel();
     }
 
-    // In a live Doom 1 level: Continue, New Game, Options, Read This, Quit.
+    // In a live Doom 1 level: Continue, New Game, Options, Load, Save,
+    // Read This, Quit.
     reset(GameMode_t.registered, 0 /*GS_LEVEL*/);
     key(KEY_DOWNARROW);
     key(KEY_DOWNARROW);
@@ -113,7 +114,7 @@ try {
     key(KEY_ENTER);
     const quitDismissed = key(0x6e /*n*/);
     menu.M_StartControlPanel();
-    const quitAfterCancel = cursor(4);
+    const quitAfterCancel = cursor(6);
 
     // A remembered browser-only Continue cannot mis-point after it disappears;
     // the stable source row New Game becomes the fallback.

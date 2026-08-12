@@ -11,7 +11,10 @@ import {
   screens, patch_t,
 } from './v_video.js';
 import { V_PaletteCSS } from './v_palette.js';
-import { W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum } from './w_wad.js';
+import {
+  W_InitMultipleFiles, W_CheckNumForName, W_CacheLumpName, W_CacheLumpNum,
+  W_LumpLength,
+} from './w_wad.js';
 import { M_CheckParm, myargv, myargc } from './m_argv.js';
 import { M_LoadDefaults } from './m_misc.js';
 import { M_RegisterDoomDefaults } from './m_defaults.js';
@@ -26,7 +29,12 @@ import {
 import { P_Random } from './m_random.js';
 import { ANG45, ANGLETOFINESHIFT, finecosine, finesine } from './tables.js';
 import { P_SetupLevel, P_SetExternals as P_SetupSetExternals } from './p_setup.js';
-import { R_NewMap, R_RenderPlayerView, R_SetupFrame } from './r_main.js';
+import { R_NewMap, R_RenderPlayerView, R_SetupFrame, R_Shutdown } from './r_main.js';
+import * as _PSaveg from './p_saveg.js';
+import {
+  ML_LINEDEFS, ML_SECTORS, ML_SIDEDEFS,
+  SIZEOF_maplinedef_t, SIZEOF_mapsector_t, SIZEOF_mapsidedef_t,
+} from './doomdata.js';
 import { D_FreeCamera } from './d_freecamera.js';
 import { D_KeyboardInput } from './d_keyboard.js';
 import { players, consoleplayer } from './doomstat.js';
@@ -472,7 +480,7 @@ async function D_DoomLoop() {
   _amDrawer = am.AM_Drawer;
   _amTicker = am.AM_Ticker;
   const mMenu = await import('./m_menu.js');
-  mMenu.M_SetExternals({ D_StartTitle });
+  mMenu.M_SetExternals({ D_StartTitle, listSaves: _PSaveg.P_ListSaves });
   _menuDrawer = mMenu.M_Drawer;
   _menuTicker = mMenu.M_Ticker;
   _isStatusBarVisible = mMenu.isStatusBarVisible;
@@ -813,7 +821,32 @@ export async function D_DoomMain() {
 
   // Wire p_setup -> r_data + p_mobj.
   const { P_SpawnMobj, ONFLOORZ, ONCEILINGZ, MF_SPAWNCEILING, MF_COUNTKILL, MF_COUNTITEM, MF_NOTDMATCH } = await import('./p_mobj.js');
-  const { mobjinfo, NUMMOBJTYPES, MT_TFOG } = await import('./info.js');
+  const { mobjinfo, NUMMOBJTYPES, NUMSPRITES, NUMSTATES, MT_TFOG } =
+    await import('./info.js');
+  // Save restoration constructs archived actors/specials directly, without
+  // gameplay spawn functions or dynamic imports. Supply every live engine
+  // type/callback needed to rebuild ownership, spatial links, and movers.
+  _PSaveg.P_SaveGameSetExternals({
+    makePlayer: _PU.makePlayer,
+    mobj_t: _PMobj.mobj_t,
+    mobjinfo,
+    NUMMOBJTYPES,
+    NUMSPRITES,
+    NUMSTATES,
+    P_MobjThinker: _PMobj.P_MobjThinker,
+    P_RemoveMobj: _PMobj.P_RemoveMobj,
+    P_SetThingPosition: _PMobj.P_SetThingPosition,
+    T_VerticalDoor: pDoors.T_VerticalDoor,
+    T_MoveCeiling: pCeil.T_MoveCeiling,
+    T_MoveFloor: pFloor.T_MoveFloor,
+    T_PlatRaise: pPlats.T_PlatRaise,
+    T_LightFlash: pLights.T_LightFlash,
+    T_StrobeFlash: pLights.T_StrobeFlash,
+    T_Glow: pLights.T_Glow,
+    T_FireFlicker: pLights.T_FireFlicker,
+    P_AddActiveCeiling: pCeil.P_AddActiveCeiling,
+    P_AddActivePlat: pPlats.P_AddActivePlat,
+  });
   // Make P_InitThinkers visible in loadLevel scope.
   const { P_InitThinkers } = await import('./p_tick.js');
 
@@ -960,7 +993,13 @@ export async function D_DoomMain() {
   D_KeyboardInput.installEarly();
   // Hoist the level-load sequence so both the URL warp path and menu /
   // G_DoLoadLevel can drive it.
-  const loadLevel = (episode, map, skill) => {
+  const loadLevel = (episode, map, skill, afterSetup = null) => {
+    // Retire the old retained scene before P_SetupLevel spawns the base map.
+    // P_SpawnMobj's renderer hook then sees no active things group, so neither
+    // base setup nor save restoration can register transient sprites into the
+    // old level. R_NewMap below discovers only the final thinker list once.
+    R_Shutdown();
+    mobjsByMapThing.clear();
     set_gameepisode(episode);
     set_gamemap(map);
     set_gameskill(skill);
@@ -976,7 +1015,18 @@ export async function D_DoomMain() {
     // P_SetupLevel internally runs P_InitThinkers BEFORE P_LoadThings and
     // P_SpawnSpecials AFTER, matching p_setup.c's ordering.
     P_SetupLevel(episode, map, 0, skill);
-    R_NewMap();
+    if (afterSetup !== null) {
+      const result = afterSetup();
+      if (result !== null && result !== undefined &&
+          (typeof result === 'object' || typeof result === 'function') &&
+          typeof result.then === 'function') {
+        I_Error('loadLevel: afterSetup must be synchronous');
+      }
+      // P_SetupLevel associates source mapthings with its temporary base
+      // mobjs. Save restoration replaces that thinker population, so none of
+      // those stale object references may survive into later level logic.
+      mobjsByMapThing.clear();
+    }
     // Corrupt-map fallback: a valid co-op map has one numbered start per active
     // player, while deathmatch spawned everyone just after P_LoadThings.
     for (let i = 0; i < doomstat.playeringame.length; i++) {
@@ -987,6 +1037,9 @@ export async function D_DoomMain() {
         if (ps !== undefined) P_SpawnPlayer({ ...ps, type: i + 1 });
       }
     }
+    // Build exactly once, after an optional save callback has replaced the base
+    // world/thinkers and the corrupt-map fallback has supplied any missing mo.
+    R_NewMap();
     _PTick.P_SetExternals({
       P_PlayerThink: _PU.P_PlayerThink,
       P_RespawnSpecials: PM.P_RespawnSpecials,
@@ -999,8 +1052,50 @@ export async function D_DoomMain() {
     const localPlayer = doomstat.players[doomstat.consoleplayer];
     if (localPlayer !== null && localPlayer !== undefined) D_KeyboardInput.init(localPlayer);
   };
+  const validateSaveMap = (blob) => {
+    const fingerprint = blob?.mapFingerprint;
+    if (fingerprint === null || fingerprint === undefined ||
+        !Number.isInteger(blob.episode) || !Number.isInteger(blob.map) ||
+        !Number.isInteger(fingerprint.sectors) || fingerprint.sectors < 0 ||
+        !Number.isInteger(fingerprint.lines) || fingerprint.lines < 0 ||
+        !Number.isInteger(fingerprint.sides) || fingerprint.sides < 0) return false;
+    // Reject values G_InitNew would clamp. Otherwise preflight could approve
+    // (for example) a PWAD E1M10, mutate the live game, and then set up E1M9.
+    if (doomstat.gamemode !== GameMode_t.commercial && blob.map > 9) return false;
+    if (doomstat.gamemode === GameMode_t.shareware && blob.episode !== 1) return false;
+    if (doomstat.gamemode !== GameMode_t.commercial &&
+        doomstat.gamemode !== GameMode_t.retail && blob.episode > 3) return false;
+    const mapName = doomstat.gamemode === GameMode_t.commercial ?
+      `${blob.map < 10 ? 'MAP0' : 'MAP'}${blob.map}` :
+      `E${blob.episode}M${blob.map}`;
+    const lumpnum = W_CheckNumForName(mapName);
+    if (lumpnum < 0) return false;
+    try {
+      const sectorBytes = W_LumpLength(lumpnum + ML_SECTORS);
+      const lineBytes = W_LumpLength(lumpnum + ML_LINEDEFS);
+      const sideBytes = W_LumpLength(lumpnum + ML_SIDEDEFS);
+      if (sectorBytes % SIZEOF_mapsector_t !== 0 ||
+          lineBytes % SIZEOF_maplinedef_t !== 0 ||
+          sideBytes % SIZEOF_mapsidedef_t !== 0) return false;
+      return fingerprint.sectors === sectorBytes / SIZEOF_mapsector_t &&
+        fingerprint.lines === lineBytes / SIZEOF_maplinedef_t &&
+        fingerprint.sides === sideBytes / SIZEOF_mapsidedef_t;
+    } catch (_) {
+      // A truncated or otherwise malformed target map must be rejected before
+      // G_InitNew tears down the currently playable world.
+      return false;
+    }
+  };
   // Expose to G_DoLoadLevel callers (menu New Game) — see g_game.js setExternals.
-  if (_GGame.G_SetExternals) _GGame.G_SetExternals({ loadLevel });
+  if (_GGame.G_SetExternals) {
+    _GGame.G_SetExternals({
+      loadLevel,
+      saveGame: _PSaveg.P_SaveGame,
+      readSave: _PSaveg.P_ReadSaveGame,
+      restoreSave: _PSaveg.P_RestoreGame,
+      validateSaveMap,
+    });
+  }
 
   // -warp E1M3 / ?map=E1M1 launches straight into a level.
   const warp = parseMapParam();

@@ -151,17 +151,27 @@ try {
     const f7Declined = key('n'.charCodeAt(0));
     const f7Closed = doomstat.menuactive === false;
 
-    // F10 opens its y/n prompt, while the intentionally unavailable
-    // Save/Load shortcut family falls through untouched.
+    // F10 opens its y/n prompt.
     const f10Consumed = key(KEY_F10);
     const f10PromptOpen = doomstat.menuactive;
     const f10Unsupported = key(KEY_ENTER);
     const f10Declined = key('n'.charCodeAt(0));
     const f10Closed = doomstat.menuactive === false;
-    const disabled = [KEY_F2, KEY_F3, KEY_F6, KEY_F9].map((value) => ({
-      consumed: key(value),
-      menuactive: doomstat.menuactive,
-    }));
+    // The native Save/Load shortcut family is available again. F2/F3 open
+    // their screens, F6 asks the user to choose an initial quick slot, and a
+    // subsequent F9 reports that no completed quick slot exists yet.
+    const f2Consumed = key(KEY_F2);
+    const f2Open = doomstat.menuactive;
+    const f2Closed = key(KEY_ESCAPE) && doomstat.menuactive === false;
+    const f3Consumed = key(KEY_F3);
+    const f3Open = doomstat.menuactive;
+    const f3Closed = key(KEY_ESCAPE) && doomstat.menuactive === false;
+    const f6Consumed = key(KEY_F6);
+    const f6PickOpen = doomstat.menuactive;
+    const f6Closed = key(KEY_ESCAPE) && doomstat.menuactive === false;
+    const f9Consumed = key(KEY_F9);
+    const f9NoSlotPrompt = doomstat.menuactive;
+    const f9Dismissed = key(KEY_ENTER) && doomstat.menuactive === false;
 
     return {
       f4Consumed,
@@ -191,7 +201,18 @@ try {
       f10Unsupported,
       f10Declined,
       f10Closed,
-      disabled,
+      f2Consumed,
+      f2Open,
+      f2Closed,
+      f3Consumed,
+      f3Open,
+      f3Closed,
+      f6Consumed,
+      f6PickOpen,
+      f6Closed,
+      f9Consumed,
+      f9NoSlotPrompt,
+      f9Dismissed,
     };
   });
 
@@ -201,7 +222,9 @@ try {
     'f5StayedClosed', 'f8OffConsumed', 'f8OnConsumed',
     'f7InactiveConsumed', 'f7InactiveClosed', 'f7ActiveConsumed',
     'f7PromptOpen', 'f7Declined', 'f7Closed', 'f10Consumed',
-    'f10PromptOpen', 'f10Declined', 'f10Closed',
+    'f10PromptOpen', 'f10Declined', 'f10Closed', 'f2Consumed', 'f2Open',
+    'f2Closed', 'f3Consumed', 'f3Open', 'f3Closed', 'f6Consumed',
+    'f6PickOpen', 'f6Closed', 'f9Consumed', 'f9NoSlotPrompt', 'f9Dismissed',
   ]) {
     if (result[name] !== true) failures.push(`${name}: ${result[name]}`);
   }
@@ -219,11 +242,6 @@ try {
       result.f8On.menuactive !== false) failures.push(`F8 on: ${JSON.stringify(result.f8On)}`);
   if (result.f7Unsupported !== false) failures.push(`F7 unsupported: ${result.f7Unsupported}`);
   if (result.f10Unsupported !== false) failures.push(`F10 unsupported: ${result.f10Unsupported}`);
-  for (const value of result.disabled) {
-    if (value.consumed !== false || value.menuactive !== false) {
-      failures.push(`disabled shortcut: ${JSON.stringify(value)}`);
-    }
-  }
   if (errors.length !== 0) failures.push(`page errors: ${errors.join('; ')}`);
   if (failures.length !== 0) throw new Error(failures.join('\n'));
   console.log(JSON.stringify(result));
