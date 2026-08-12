@@ -336,9 +336,15 @@ export function EV_BuildStairs(line, type) {
   const stepHeight = (type === build8 ? 8 : 16) * FRACUNIT;
   const speed = P_StairSpeed(type);
   let rtn = 0;
-  for (let i = 0; i < numsectors; i++) {
-    const seed = sectors[i];
-    if (seed.tag !== line.tag || seed.specialdata !== null) continue;
+  let secnum = -1;
+  while (true) {
+    do {
+      secnum++;
+    } while (secnum < numsectors && sectors[secnum].tag !== line.tag);
+    if (secnum >= numsectors) break;
+
+    const seed = sectors[secnum];
+    if (seed.specialdata !== null) continue;
     rtn = 1;
     let height = seed.floorheight + stepHeight;
     const texture = seed.floorpic;
@@ -365,6 +371,9 @@ export function EV_BuildStairs(line, type) {
         if (other.specialdata !== null) continue;
         beginThinker(other, height);
         stairsec = other;
+        // p_floor.c:536-537 — the inner walk mutates secnum. The outer tagged
+        // sector search resumes after the last accepted stair sector.
+        secnum = sectors.indexOf(other);
         walked = true;
         break;
       }
