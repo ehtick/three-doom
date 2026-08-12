@@ -1,4 +1,7 @@
-import { P_PainSkullCoordinate } from '../src/p_enemy_spawn_logic.js';
+import {
+  P_CountActiveSkulls,
+  P_PainSkullCoordinate,
+} from '../src/p_enemy_spawn_logic.js';
 
 function assertEquals(actual, expected, message) {
   if (actual !== expected) {
@@ -23,4 +26,41 @@ Deno.test('Pain Elemental skull placement retains negative FixedMul rounding', (
       `fine component ${fineComponent}`,
     );
   }
+});
+
+function makeThinkerCap(entries) {
+  const cap = {};
+  let previous = cap;
+  for (const entry of entries) {
+    previous.next = entry;
+    previous = entry;
+  }
+  previous.next = cap;
+  return cap;
+}
+
+Deno.test('Pain Elemental cap excludes Lost Souls pending lazy removal', () => {
+  const mobjThinker = () => {};
+  const removedThinker = () => {};
+  const active = Array.from({ length: 20 }, () => ({
+    function: mobjThinker,
+    __mobj: { type: 18 },
+  }));
+  const pendingRemoval = { function: removedThinker, __mobj: { type: 18 } };
+  const unrelated = { function: mobjThinker, __mobj: { type: 17 } };
+
+  assertEquals(
+    P_CountActiveSkulls(makeThinkerCap([...active, pendingRemoval, unrelated]), mobjThinker, 18),
+    20,
+    'pending removal and other mobj types excluded',
+  );
+  assertEquals(
+    P_CountActiveSkulls(
+      makeThinkerCap([...active, { function: mobjThinker, __mobj: { type: 18 } }]),
+      mobjThinker,
+      18,
+    ),
+    21,
+    'twenty-one active skull thinkers counted',
+  );
 });

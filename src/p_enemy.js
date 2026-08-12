@@ -5,7 +5,7 @@
 // corpse resurrection).
 
 import { P_RegisterAction, states, mobjinfo, actionRegistry, S_BRAINEXPLODE1, S_VILE_HEAL1 } from './info.js';
-import { P_SetMobjState, P_SetThingPosition, P_UnsetThingPosition, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, MF_SOLID, MF_SKULLFLY, MF_CORPSE, P_SpawnMissile, P_SpawnMobj, P_SpawnPuff, P_RemoveMobj } from './p_mobj.js';
+import { P_MobjThinker, P_SetMobjState, P_SetThingPosition, P_UnsetThingPosition, MF_SHOOTABLE, MF_AMBUSH, MF_JUSTHIT, MF_JUSTATTACKED, MF_SOLID, MF_SKULLFLY, MF_CORPSE, P_SpawnMissile, P_SpawnMobj, P_SpawnPuff, P_RemoveMobj } from './p_mobj.js';
 import { P_TeleportMove, P_CheckPosition } from './p_map.js';
 import { P_BlockThingsIterator } from './p_maputl.js';
 import { bmaporgx, bmaporgy } from './p_setup.js';
@@ -20,7 +20,7 @@ import { EV_DoFloor, lowerFloorToLowest, raiseToTexture } from './p_floor.js';
 import { EV_DoDoor } from './p_doors.js';
 import { P_Random } from './m_random.js';
 import { A_Chase } from './p_enemy_chase.js';
-import { P_PainSkullCoordinate } from './p_enemy_spawn_logic.js';
+import { P_CountActiveSkulls, P_PainSkullCoordinate } from './p_enemy_spawn_logic.js';
 import { P_RelinkVileFire } from './p_enemy_fire_logic.js';
 
 // External wiring.
@@ -741,9 +741,7 @@ P_RegisterAction('A_SpidRefire', (a) => {
 // Pain Elemental — spawns Lost Souls. Uses the same A_SkullAttack we ported earlier.
 function painShootSkull(actor, angle) {
   const cap = globalThis.__doom_thinkercap;
-  let count = 0;
-  if (cap) { let th = cap.next; while (th !== cap) { if (th.__mobj && th.__mobj.type === MT_SKULL) count++; th = th.next; } }
-  if (count > 20) return;
+  if (P_CountActiveSkulls(cap, P_MobjThinker, MT_SKULL) > 20) return;
   const an = (angle >>> ANGLETOFINESHIFT) & FINEMASK;
   const skullInfo = mobjinfo[MT_SKULL];
   const prestep = 4 * 65536 + (3 * (actor.info.radius + skullInfo.radius) / 2);
