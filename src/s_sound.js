@@ -9,9 +9,9 @@ import { snd_SfxVolume, snd_MusicVolume, set_snd_SfxVolume, set_snd_MusicVolume,
 import { ANG90, ANGLETOFINESHIFT, FINEMASK, finecosine, finesine } from './tables.js';
 import { R_PointToAngle2 } from './r_bsp.js';
 import { M_Random } from './m_random.js';
-import { GameMode_t } from './doomdef.js';
 import { S_ChooseChannel } from './s_channel_logic.js';
 import { S_AttenuatedVolume } from './s_attenuation_logic.js';
+import { S_LevelMusic } from './s_music_logic.js';
 
 // Each channel: { sfxinfo, origin (mobj or null), handle }
 let channels = [];
@@ -32,13 +32,6 @@ export function S_Init(sfxVolume, musicVolume) {
   channels = makeChannels(numChannels);
 }
 
-// s_sound.c — Doom 1 E4 substitute music (E4 reuses the E2/E3 tracks).
-const _spmus = [
-  1 /*mus_e3m4*/, 2 /*mus_e3m2*/, 3 /*mus_e3m3*/, 4 /*mus_e1m5*/,
-  5 /*mus_e2m7*/, 6 /*mus_e2m4*/, 7 /*mus_e2m6*/, 8 /*mus_e2m5*/,
-  9 /*mus_e1m9*/,
-];
-
 export function S_Start() {
   // s_sound.c:159 — stop everything before level swap.
   for (let i = 0; i < channels.length; i++) {
@@ -48,21 +41,7 @@ export function S_Start() {
   }
   // s_sound.c:214 — clear any held pause before starting the level track.
   _musPaused = false;
-  // s_sound.c:172 — pick the level music. mus enum order in sounds.h
-  // matches our _musicNames indexing.
-  let mnum;
-  if (gamemode === GameMode_t.commercial) {
-    mnum = 33 /*mus_runnin*/ + gamemap - 1;
-  } else {
-    // Doom 1 uses (ep-1)*9 + map. E4 routes through the spmus[] substitution
-    // table (E4 reuses tracks from E1-E3 since the IWAD has no D_E4M* lumps).
-    if (gameepisode < 4) {
-      mnum = 1 /*mus_e1m1*/ + (gameepisode - 1) * 9 + gamemap - 1;
-    } else {
-      mnum = _spmus[gamemap - 1];
-    }
-  }
-  S_ChangeMusic(mnum, true);
+  S_ChangeMusic(S_LevelMusic(gamemode, gameepisode, gamemap), true);
 }
 
 // s_sound.c S_StopChannel — stop the sound on channel cnum and free the slot.
