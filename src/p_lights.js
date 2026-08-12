@@ -145,14 +145,12 @@ export function EV_TurnTagLightsOff(line) {
 export function EV_LightTurnOn(line, bright) {
   for (let i = 0; i < sectors.length; i++) {
     if (sectors[i].tag !== line.tag) continue;
-    let target = bright;
     if (bright === 0) {
-      target = 0;
       for (const li of sectors[i].lines) {
         const other = (li.frontsector === sectors[i]) ? li.backsector : li.frontsector;
-        if (other !== null && other.lightlevel > target) target = other.lightlevel;
+        if (other !== null && other.lightlevel > bright) bright = other.lightlevel;
       }
     }
-    sectors[i].lightlevel = target;
+    sectors[i].lightlevel = bright;
   }
 }
